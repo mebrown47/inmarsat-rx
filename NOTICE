@@ -1,0 +1,13 @@
+inmarsat-rx
+Copyright 2026 the inmarsat-rx authors. Licensed under the Apache License, Version 2.0 (LICENSE).
+
+Ported from the SDR Workbench's decoders (Apache-2.0, same authors).
+
+- Jonathan Olds, Copyright 2015-2019: JAERO (https://github.com/jontio/JAERO, MIT License).
+  src/aero.c follows JAERO's Aero P-channel scrambler, interleaver, CRC, frame layouts (10.5k and
+  600/1200 bit/s), ISU/SSU reassembly and ACARS parsing. src/msk.c (the MSK demodulator) is
+  original to this project.
+- STD-C (src/stdc.c) was written from the published frame structure; its protocol constants were
+  checked against inmarsat-sniffer (GPL-3.0), used only as a reference: no code was copied.
+- libacars-2 (Tomasz Lemiech, MIT License) decodes ACARS applications when linked.
+- libairspy and libhackrf (BSD 3-Clause) drive the USB receivers when linked.
