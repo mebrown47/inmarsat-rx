@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // ACARS application decoding (FANS-1/A CPDLC and ADS-C, other ARINC 622, MIAM) with libacars.
 #ifndef APPS_H
 #define APPS_H

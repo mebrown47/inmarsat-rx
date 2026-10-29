@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 #include "out.h"
 #include <netdb.h>
 #include <pthread.h>

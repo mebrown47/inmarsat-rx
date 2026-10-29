@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // DSP building blocks, ported from the SDR Workbench (usb/demod.js, usb/psk.js, usb/spectrum.js).
 #include "dsp.h"
 #include <math.h>

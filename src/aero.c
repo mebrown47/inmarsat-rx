@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Inmarsat Aero P-channel decoders, ported from the SDR Workbench (usb/aero.js).
 //
 // The scrambler, interleaver, CRC, frame layouts, ISU/SSU reassembly and ACARS parsing follow

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Inmarsat Aero P-channel decoders: Aero-H+ (10.5 kbit/s OQPSK) and Aero-L (600/1200 bit/s MSK).
 // Frame sync, de-interleaving, soft Viterbi, descrambling, signal-unit CRC, ISU/SSU reassembly
 // and ACARS parsing.

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // IQ sources. Every input delivers interleaved float I/Q (full scale ±1).
 #ifndef INPUT_H
 #define INPUT_H

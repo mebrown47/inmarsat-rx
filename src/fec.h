@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // K=7, rate 1/2 convolutional code used by Inmarsat STD-C and Aero (taps 0x5B/0x79 with the
 // newest input bit in bit 6 of the register; JAERO's 109/79 are the reversed convention).
 #ifndef FEC_H

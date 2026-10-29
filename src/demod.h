@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Channel front end and symbol demodulators: coherent PSK (STD-C BPSK, Aero-H+ OQPSK) and
 // non-coherent MSK (Aero-L). Ported from the SDR Workbench (usb/psk.js, usb/msk.js).
 #ifndef DEMOD_H

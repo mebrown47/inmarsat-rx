@@ -1,0 +1,17 @@
+{
+ "global": {
+  "core:datatype": "ci8",
+  "core:sample_rate": 12500,
+  "core:dataset": "aerol600-i4f3-12k5.cs8",
+  "core:version": "1.0.0",
+  "core:description": "34 s of Inmarsat I-4 F3 Aero-L 600 bit/s P-channels 1545.060 and 1545.065 MHz, cut from a 2026-10-04 Airspy R2 recording in Mandan ND (12.5 kS/s, 8-bit)"
+ },
+ "captures": [
+  {
+   "core:sample_start": 0,
+   "core:frequency": 1545062500.0,
+   "core:datetime": "2026-10-04T23:38:42Z"
+  }
+ ],
+ "annotations": []
+}

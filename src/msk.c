@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Non-coherent MSK demodulator for Inmarsat Aero-L (600/1200 bit/s), ported from the SDR
 // Workbench (usb/msk.js). Chain: front end to ~16 samples/bit -> coarse carrier acquisition
 // (squared signal: two lines one bit rate apart) -> NCO -> channel filter -> FM discriminator ->
@@ -86,7 +88,7 @@ static void acquire(msk_t *m, const float *iq, int n) {
 #undef SCORE
 	double offset = (double)(best - N / 2) / N * m->rate / 2;
 	m->freq = 2 * M_PI * offset / m->rate;
-	m->acqlen = 0; m->acquired = 1; m->unlocked_bits = 0;
+	m->acquired = 1; m->unlocked_bits = 0;  // acq keeps the samples: process() demodulates them next.
 	free(p); free(power); free(seg);
 }
 
@@ -114,7 +116,11 @@ int msk_process(msk_t *m, const float *iq, int n, const float **bits) {
 	const float *x;
 	int k = frontend_process(m->fe, iq, n, &x), count = 0;
 	*bits = m->out;
-	if (!m->acquired) { acquire(m, x, k); return 0; }
+	if (!m->acquired) {
+		acquire(m, x, k);
+		if (!m->acquired) return 0;
+		x = m->acq; k = m->acqlen; m->acqlen = 0;  // Demodulate everything the search looked at.
+	}
 	m->cum = dsp_reserve(m->cum, &m->cumcap, (size_t)m->cumlen + k + 1, sizeof(double));
 	if (m->t < 1.5 * m->omega + 1) m->t = 1.5 * m->omega + 1;
 	for (int i = 0; i < k; i++) {

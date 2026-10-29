@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Inmarsat-C (STD-C) NCS TDM decoder, ported from the SDR Workbench (usb/stdc.js).
 //
 // Written from the published frame structure. Protocol constants (unique word, permutation,

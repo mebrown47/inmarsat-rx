@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // DSP building blocks: filter design, decimating FIR, FFT. Samples are interleaved I/Q floats.
 #ifndef DSP_H
 #define DSP_H

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Inmarsat-C (STD-C) NCS TDM decoder: frame sync, de-permutation, de-interleaving, soft Viterbi,
 // descrambling, packet framing/checksum, bulletin boards and EGC message reassembly.
 #ifndef STDC_H
