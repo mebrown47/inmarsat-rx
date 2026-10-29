@@ -61,12 +61,14 @@ function pad(x){return String(x).padStart(2,"0");}
 function dt(ms){const d=new Date(ms);return pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())+" "+pad(d.getUTCHours())+":"+pad(d.getUTCMinutes())+":"+pad(d.getUTCSeconds());}
 function card(k,v,sub){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+(sub?' <small>'+sub+'</small>':'')+'</div></div>';}
 const SAT={i4f3:"I-4 F3",i3f5:"I-3 F5",alphasat:"Alphasat","?":"Unassigned"};
+// STD-C land earth stations seen on this receiver (kept in step with LES_NAMES in observatory/common.py).
+const LESNAMES={"i4f3:2":"Stratos CSAT","i4f3:12":"NL Burum","i3f5:12":"NL Burum","i4f3:44":"NCS","i3f5:44":"NCS"};
 async function load(){
   try{D=await (await fetch("/api/deliveries",{cache:"no-store"})).json();}
   catch(e){$("status").innerHTML='<span class="dot" style="background:var(--warn)"></span>receiver not answering';return;}
   $("status").innerHTML='<span class="dot"></span>'+D.deliveries.length+' in the last 24 h · '+D.open+' open · kept in '+esc(D.dir);
   const les=[...new Set(D.deliveries.map(m=>m.sat+":"+m.les))].sort(),cur=$("les").value;
-  $("les").innerHTML='<option value="">all LES</option>'+les.map(k=>{const[s,l]=k.split(":");return '<option value="'+esc(k)+'"'+(k===cur?" selected":"")+'>'+esc((SAT[s]||s)+" LES "+l)+'</option>';}).join("");
+  $("les").innerHTML='<option value="">all LES</option>'+les.map(k=>{const[s,l]=k.split(":");return '<option value="'+esc(k)+'"'+(k===cur?" selected":"")+'>'+esc((SAT[s]||s)+" LES "+l+(LESNAMES[k]?" "+LESNAMES[k]:""))+'</option>';}).join("");
   render();
 }
 function render(){
@@ -80,7 +82,7 @@ function render(){
   const R=M.filter(m=>(!les||m.sat+":"+m.les===les)&&(!kind||(kind==="text"&&!m.binary)||(kind==="binary"&&m.binary)||(kind==="gaps"&&m.missing))&&
     (!q||(m.text||"").toLowerCase().includes(q)||(m.ship||"").includes(q)));
   $("rows").innerHTML=R.length?'<table><tr><th>UTC</th><th>Satellite</th><th>LES</th><th>Ship (hash)</th><th class="r">Packets</th><th class="r">Bytes</th><th>Message</th></tr>'+
-    R.map(m=>'<tr><td class="mono n">'+dt(m.t)+'</td><td>'+esc(SAT[m.sat]||m.sat)+'</td><td class="mono">'+m.les+' <span class="n">ch '+m.lc+'</span></td><td class="mono n">'+esc(m.ship||"unknown")+
+    R.map(m=>'<tr><td class="mono n">'+dt(m.t)+'</td><td>'+esc(SAT[m.sat]||m.sat)+'</td><td>'+m.les+(LESNAMES[m.sat+":"+m.les]?" "+esc(LESNAMES[m.sat+":"+m.les]):"")+' <span class="n">ch '+m.lc+'</span></td><td class="mono n">'+esc(m.ship||"unknown")+
       '</td><td class="r">'+m.packets+(m.missing?' <span class="warnc">−'+m.missing+'</span>':'')+'</td><td class="r n">'+m.bytes+
       '</td><td class="body">'+(m.binary?'<span class="n">binary, '+m.bytes+' bytes</span>':esc(m.text))+'</td></tr>').join("")+'</table>'
     :'<div class="empty">'+(M.length?"no deliveries match":"no deliveries yet — messages to ships are announced a few times an hour per LES")+'</div>';

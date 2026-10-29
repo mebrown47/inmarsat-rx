@@ -4,7 +4,7 @@
 satellites and services, and the CPDLC and ADS-C logs. Adapted from vdl2-observatory's Messages
 page."""
 
-from common import connect_ro, db_ready, page, sat_clause, satellites_meta, window
+from common import connect_ro, db_ready, les_names, page, sat_clause, satellites_meta, window
 
 
 def build_aviation(path, hours=None, sat=None, aes=None, limit=300):
@@ -51,7 +51,7 @@ def build_aviation(path, hours=None, sat=None, aes=None, limit=300):
         labels = [{"lbl": l, "n": n} for l, n in q(
             f"SELECT lbl,COUNT(*) FROM messages WHERE t>=? AND ack=0{sc} GROUP BY lbl ORDER BY 2 DESC LIMIT 16", t0, *sa)]
         return {"satellites": satellites_meta(), "sats_present": present, "floor": floor, "hmax": hmax,
-                "cards": cards, "tails": tails, "aes": aes, "history": history, "cpdlc": cpdlc, "adsc": adsc,
+                "les_names": les_names(path), "cards": cards, "tails": tails, "aes": aes, "history": history, "cpdlc": cpdlc, "adsc": adsc,
                 "labels": labels, "last_data": q("SELECT MAX(t) FROM messages")[0][0]}
     finally:
         con.close()

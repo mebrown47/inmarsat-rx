@@ -139,6 +139,9 @@ function card(k,v,sub){return '<div class="card"><div class="k">'+k+'</div><div 
   (sub?' <small>'+sub+'</small>':'')+'</div></div>';}
 function svc(t){return '<span class="svc '+t+'">'+(SVC[t]||t)+'</span>';}
 // "?": a carrier --scan found, which could be on any satellite the antenna sees.
+// STD-C land earth stations seen on this receiver (kept in step with LES_NAMES in observatory/common.py).
+const LESNAMES={"i4f3:2":"Stratos CSAT","i4f3:12":"NL Burum","i3f5:12":"NL Burum","i4f3:44":"NCS","i3f5:44":"NCS"};
+function stationName(st,sat){if(!st)return "";const m=/LES (\d+)/.exec(st),n=m&&LESNAMES[sat+":"+m[1]];return n?st+" ("+n+")":st;}
 function satName(id){if(id==="?")return "Unassigned";const s=(D.satellites||[]).find(x=>x.id===id);return s?s.name:id;}
 function keep(sat,type){return (F.sat==="all"||F.sat===sat)&&(F.svc==="all"||F.svc===SVCGROUP[type]);}
 function save(){try{localStorage.setItem("inmarsat-live-filters",JSON.stringify(F));}catch(e){}}
@@ -185,7 +188,7 @@ function render(){
     if(!cs.length)continue;
     const sd=(D.satellites||[]).find(x=>x.id===s),ncs=cs.find(c=>c.station);
     h+='<h3>'+esc(satName(s))+'<span class="hint">'+(sd?esc(sd.slot+" · "+sd.region):"")+
-      (ncs?" · NCS "+esc(ncs.station):"")+'</span></h3><table><tr><th>MHz</th><th>Service</th><th>State</th><th class="r">SNR</th>'+
+      (ncs?" · NCS "+esc(stationName(ncs.station,s)):"")+'</span></h3><table><tr><th>MHz</th><th>Service</th><th>State</th><th class="r">SNR</th>'+
       '<th class="r">Offset</th><th class="r">BER</th><th class="r">Frames</th><th class="r">Units OK</th><th class="r">Messages</th></tr>';
     for(const c of cs){
       const st=c.resting?["","resting (no frames here; tries again soon)"]:c.synced?["sync","in sync"]:c.locked?["lock","locked, no frames"]:c.acquired?["","tracking"]:["","searching"];
@@ -218,7 +221,7 @@ function render(){
     :'<div class="empty">no aircraft in the last 30 minutes</div>';
 
   $("egc").innerHTML=egc.length?'<table><tr><th>UTC</th><th>Station</th><th>Priority</th><th>Service</th><th>Text</th></tr>'+
-    egc.slice(0,60).map(m=>'<tr><td class="mono n">'+hms(m.t)+'</td><td>'+esc(m.station||satName(m.sat))+'</td><td><span class="prio '+esc(m.prio)+'">'+esc(m.prio)+
+    egc.slice(0,60).map(m=>'<tr><td class="mono n">'+hms(m.t)+'</td><td>'+esc(stationName(m.station,m.sat)||satName(m.sat))+'</td><td><span class="prio '+esc(m.prio)+'">'+esc(m.prio)+
       '</span></td><td>'+esc(m.service_name)+(m.complete?'':' <span class="warnc" title="parts missing">incomplete</span>')+
       '</td><td class="body mono">'+esc(m.txt.slice(0,600))+(m.txt.length>600?"…":"")+'</td></tr>').join("")+'</table>'
     :'<div class="empty">'+(D.channels.some(c=>c.type==="stdc")?"no EGC broadcast received yet":"no STD-C channel in this setup")+'</div>';
