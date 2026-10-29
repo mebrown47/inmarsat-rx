@@ -3,7 +3,7 @@
 """Inmarsat Observatory — Maritime: STD-C EGC broadcasts (SafetyNET navigational and weather
 warnings, distress relays, FleetNET) and the NCS each satellite's STD-C channel belongs to."""
 
-from common import connect_ro, db_ready, page, sat_clause, satellites_meta, window
+from common import connect_ro, db_ready, les_names, page, sat_clause, satellites_meta, window
 
 # STD-C packet descriptors as public descriptions of the system name them. Tentative until checked
 # against this receiver's own traffic; the page always shows the byte as well.
@@ -138,7 +138,7 @@ def build_maritime(path, hours=None, sat=None, prio=None):
                 "rows": rows, "stations": stations, "channels": chans,
                 "tally": sorted(tally.values(), key=lambda t: (t["sat"], t["freq"])),
                 "tally_totals": sorted(([d, n, b] for d, (n, b) in totals.items()), key=lambda r: -r[1]),
-                "descriptors": DESCRIPTORS,
+                "descriptors": DESCRIPTORS, "les_names": les_names(path),
                 "ships": ship_traffic(q, floor, sc, sa) if "stdc_sig" in have else None,
                 "last_data": q("SELECT MAX(t) FROM egc")[0][0]}
     finally:
@@ -200,13 +200,13 @@ function render(D){
   bars($("hourly"),D.hourly,PKEYS,PCOL,170);
   $("chans").innerHTML=D.channels.length?'<table><tr><th>Satellite</th><th>MHz</th><th>NCS</th><th class="r">In sync</th><th class="r">Frames</th><th class="r">Packets OK</th></tr>'+
     D.channels.map(c=>{const st=D.stations.find(s=>s.sat===c.sat&&s.freq===c.freq),tot=c.ok+c.bad;
-      return '<tr><td>'+esc(satName(c.sat))+'</td><td class="mono">'+mhz(c.freq)+'</td><td>'+esc(st?st.station:"–")+'</td><td class="r">'+
+      return '<tr><td>'+esc(satName(c.sat))+'</td><td class="mono">'+mhz(c.freq)+'</td><td>'+esc(st?stationName(st.station,c.sat):"–")+'</td><td class="r">'+
         (c.sync_pct==null?"–":c.sync_pct.toFixed(0)+"%")+'</td><td class="r n">'+fmt(c.frames)+'</td><td class="r">'+(tot?(100*c.ok/tot).toFixed(1)+"%":"–")+'</td></tr>';}).join("")+'</table>'
     :'<div class="empty">no STD-C channel in this window — add one with -c FREQ:stdc or a plan that has one</div>';
   $("prio").innerHTML=["all",...PKEYS].map(k=>'<button data-v="'+k+'"'+(k===PRIO?' class="on"':'')+'>'+(k==="all"?"All":k)+'</button>').join("");
   $("prio").querySelectorAll("button").forEach(b=>b.onclick=()=>{PRIO=b.dataset.v;load();});
   $("rows").innerHTML=D.rows.length?'<table><tr><th>UTC</th><th>Station</th><th>Priority</th><th>Service</th><th>Text</th></tr>'+
-    D.rows.map(m=>'<tr><td class="mono n">'+dt(m.t)+'</td><td>'+esc(m.station||satName(m.sat))+'</td><td><span class="prio '+esc(m.prio)+'">'+esc(m.prio)+
+    D.rows.map(m=>'<tr><td class="mono n">'+dt(m.t)+'</td><td>'+esc(stationName(m.station,m.sat)||satName(m.sat))+'</td><td><span class="prio '+esc(m.prio)+'">'+esc(m.prio)+
       '</span></td><td>'+esc(m.service)+'<br><span class="n">#'+m.id+(m.complete?'':' · <span class="warnc">incomplete</span>')+'</span></td><td class="body mono">'+
       esc(m.txt)+'</td></tr>').join("")+'</table>'
     :'<div class="empty">no EGC broadcasts in this window</div>';
@@ -219,11 +219,11 @@ function render(D){
       card("Data reports",fmt(sum("9a")),"acknowledged"),card("Polls",fmt(sum("a3"))),card("Distress tests",fmt(sum("a0")),fmt(sum("91"))+" alert acks")].join("");
     const P=S.per_les;
     $("perles").innerHTML=P.length?'<table><tr><th>Satellite</th><th>LES</th><th class="r">Ships</th><th class="r">Announced</th><th class="r">Uplink assigned</th><th class="r">Deliveries</th><th class="r">Msg packets</th><th class="r">Bytes</th><th class="r">Cleared</th><th class="r">Inbound acks</th><th class="r">Polls</th><th class="r">Confirmations</th></tr>'+
-      P.map(p=>'<tr><td>'+esc(satName(p.sat))+'</td><td class="mono">'+p.les+'</td><td class="r">'+p.ships+'</td><td class="r n">'+(p["81"]||"")+'</td><td class="r n">'+(p["83"]||"")+
+      P.map(p=>'<tr><td>'+esc(satName(p.sat))+'</td><td>'+esc(lesName(p.sat,p.les))+'</td><td class="r">'+p.ships+'</td><td class="r n">'+(p["81"]||"")+'</td><td class="r n">'+(p["83"]||"")+
         '</td><td class="r">'+(p.deliveries||"")+'</td><td class="r n">'+(p.aa||"")+'</td><td class="r n">'+(p.bytes||"")+'</td><td class="r n">'+(p["27"]||"")+'</td><td class="r n">'+(p["2a"]||"")+
         '</td><td class="r n">'+(p.a3||"")+'</td><td class="r n">'+(p.a8||"")+'</td></tr>').join("")+'</table>':'<div class="empty">no signalling in this window</div>';
     $("shiprecent").innerHTML=S.recent.length?'<table><tr><th>UTC</th><th>Satellite</th><th>LES</th><th>Event</th><th>Ship</th><th class="r">Ch</th><th class="r">Bytes</th></tr>'+
-      S.recent.map(r=>'<tr><td class="mono n">'+dt(r.t)+'</td><td>'+esc(satName(r.sat))+'</td><td class="mono">'+(r.les==null?"":r.les)+'</td><td>'+esc(r.kind)+
+      S.recent.map(r=>'<tr><td class="mono n">'+dt(r.t)+'</td><td>'+esc(satName(r.sat))+'</td><td>'+(r.les==null?"":esc(lesName(r.sat,r.les)))+'</td><td>'+esc(r.kind)+
         '</td><td class="mono n">'+esc(r.ship||"")+'</td><td class="r n">'+(r.lc==null?"":r.lc)+'</td><td class="r n">'+(r.bytes||"")+'</td></tr>').join("")+'</table>':'<div class="empty">none</div>';
     $("shiplist").innerHTML=S.ships.length?'<table><tr><th>Ship (hash)</th><th>LES</th><th class="r">Events</th><th class="r">First</th><th class="r">Last</th></tr>'+
       S.ships.map(v=>'<tr><td class="mono">'+esc(v.ship)+'</td><td class="n">'+esc(v.les.join(" "))+'</td><td class="r">'+v.events+'</td><td class="r n">'+dt(v.first).slice(6)+
@@ -234,7 +234,7 @@ function render(D){
   }
   // Columns for the types that say most about traffic; the rest are summed as "other".
   const COLS=["81","83","aa","a3","a8","08","27","2a","6c","7d","b1"],DN=D.descriptors||{};
-  const st=(s,f)=>{const x=D.stations.find(t=>t.sat===s&&t.freq===f);return x?x.station:"–";};
+  const st=(s,f)=>{const x=D.stations.find(t=>t.sat===s&&t.freq===f);return x?stationName(x.station,s):"–";};
   $("tally").innerHTML=D.tally.length?'<table><tr><th>Satellite</th><th>MHz</th><th>Station</th><th class="r">Packets</th>'+
     COLS.map(c=>'<th class="r" title="'+esc(DN[c]||"")+'">'+c+'</th>').join("")+'<th class="r">other</th><th class="r">kB</th></tr>'+
     D.tally.map(t=>{const other=Object.entries(t.d).filter(([k])=>!COLS.includes(k)).reduce((a,[,v])=>a+v[0],0);

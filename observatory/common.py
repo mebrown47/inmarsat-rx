@@ -17,6 +17,33 @@ SATELLITES = {
     # Carriers --scan found when more than one satellite is in view: no way to tell which.
     "?": {"name": "Unassigned", "slot": "", "region": "found by --scan"},
 }
+# STD-C land earth stations by satellite and LES number, as seen on this receiver: each name is the
+# station's own, from the header of a message it sent (2026-10-29), and LES 44 is what both NCS
+# channels report as their own LES. Only verified names; others show as "LES n". Kept in step with
+# src/web_page.html and src/content_page.html. A JSON file {"i4f3:7": "Name", ...} beside the database
+# (les_names.json) adds or overrides entries.
+LES_NAMES = {
+    "i4f3:2": "Stratos CSAT", "i4f3:12": "NL Burum", "i3f5:12": "NL Burum",
+    "i4f3:44": "NCS", "i3f5:44": "NCS",
+}
+_les_extra = {"path": None, "mtime": None, "names": {}}
+
+
+def les_names(db_path):
+    """LES_NAMES with the local les_names.json beside the database laid over it (read again when
+    the file changes)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(db_path)), "les_names.json")
+    try:
+        m = os.stat(path).st_mtime_ns
+        if (_les_extra["path"], _les_extra["mtime"]) != (path, m):
+            import json
+            with open(path) as f:
+                _les_extra.update(path=path, mtime=m, names={str(k): str(v) for k, v in json.load(f).items()})
+    except (OSError, ValueError):
+        _les_extra.update(path=path, mtime=None, names={})
+    return {**LES_NAMES, **_les_extra["names"]}
+
+
 SERVICES = {"aero": "Aero-H+ 10.5k", "aerol600": "Aero-L 600", "aerol1200": "Aero-L 1200", "stdc": "STD-C"}
 
 
@@ -135,6 +162,10 @@ let D=null,SATS=[];
 const ST={hours:"24",sat:"all"};
 try{Object.assign(ST,JSON.parse(localStorage.getItem("inmarsat-obs")||"{}"));}catch(e){}
 function satName(id){const s=SATS.find(x=>x.id===id);return s?s.name:id;}
+// "LES 12 NL Burum" when the station's name is known (LES_NAMES in common.py), else "LES 12".
+function lesName(sat,les){const n=(D&&D.les_names||{})[sat+":"+les];return n?"LES "+les+" "+n:"LES "+les;}
+// An STD-C station string from the receiver ("AOR-W · LES 44") with the LES name added.
+function stationName(st,sat){if(!st)return "";const m=/LES (\d+)/.exec(st),n=m&&(D&&D.les_names||{})[sat+":"+m[1]];return n?st+" ("+n+")":st;}
 function saveST(){try{localStorage.setItem("inmarsat-obs",JSON.stringify(ST));}catch(e){}}
 function controls(){
   document.querySelectorAll("#win button").forEach(b=>{b.classList.toggle("on",b.dataset.h===ST.hours);

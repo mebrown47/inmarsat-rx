@@ -84,6 +84,14 @@ spectrum, tries every carrier above the noise as the types its width allows (0.9
 them again after 15 minutes without frames. On the 120 s I-4 F3 test recording it found 1545.195
 and 1545.205, two Aero-L 600 carriers missing from the plan.
 
+### Land earth station names
+
+STD-C pages show an LES by name where this receiver has seen the name: LES 2 on I-4 F3 is Stratos
+CSAT and LES 12 NL Burum on both satellites (each from the header of a message the station sent),
+and LES 44 is the NCS. Others show as "LES n". To add or correct names, put a `les_names.json`
+beside the Observatory database, e.g. `{"i3f5:4": "Name"}` (satellite id, colon, LES number); the
+Observatory reads it again when it changes.
+
 ## Output
 
 One JSON object per line, the SDR Workbench message-log record (v1):

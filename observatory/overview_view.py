@@ -3,7 +3,7 @@
 """Inmarsat Observatory — Overview: traffic by service, every satellite's channels and their
 health, ground stations, the busiest aircraft, and the channels --scan added or dropped."""
 
-from common import SATELLITES, connect_ro, db_ready, page, sat_clause, satellites_meta, window
+from common import SATELLITES, connect_ro, db_ready, les_names, page, sat_clause, satellites_meta, window
 
 
 def build_overview(path, hours=None, sat=None):
@@ -75,7 +75,7 @@ def build_overview(path, hours=None, sat=None):
             f"ORDER BY t DESC LIMIT 40", floor, *sa)]
         last_data = q("SELECT MAX(t) FROM messages")[0][0]
         return {"satellites": satellites_meta(), "sats_present": present, "floor": floor, "hmax": hmax,
-                "kinds": kinds, "aircraft": aircraft, "ges_count": ges_n, "aircraft_by_svc": by_svc,
+                "les_names": les_names(path), "kinds": kinds, "aircraft": aircraft, "ges_count": ges_n, "aircraft_by_svc": by_svc,
                 "aircraft_only_aerol": only_l,
                 "hourly": [hourly[h] for h in sorted(hourly)], "apps": [apps[h] for h in sorted(apps)],
                 "sats": sat_list, "ges": ges, "top": top, "events": events, "last_data": last_data}
@@ -129,7 +129,7 @@ function render(D){
   bars($("apps"),D.apps,["cpdlc","adsc"],{cpdlc:"#f778ba",adsc:"#d29922"},130);
   let h="";
   for(const s of D.sats){
-    const ncs=s.ncs.map(n=>esc(n.station)).join(", ");
+    const ncs=s.ncs.map(n=>esc(stationName(n.station,s.id))).join(", ");
     h+='<h3>'+esc(s.name)+'<span class="hint">'+esc([s.slot,s.region].filter(Boolean).join(" · "))+(ncs?" · NCS "+ncs:"")+
       '</span></h3><table><tr><th>MHz</th><th>Service</th><th class="r">In sync</th><th class="r">Frames</th><th class="r">Units OK</th>'+
       '<th class="r">BER</th><th class="r">SNR</th><th class="r">Messages</th><th class="r">Last heard</th></tr>';
