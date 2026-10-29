@@ -41,6 +41,8 @@ static void psk_reset(psk_t *p) {
 	p->coh_re = p->coh_im = 0; p->coh_mag = 1e-9; p->symbol_count = 0; p->coherent_run = 0;
 }
 
+void psk_restart(psk_t *p) { psk_reset(p); }
+
 psk_t *psk_new(psk_mode_t mode, double baud, double in_rate, double offset_hz, int reacquire) {
 	psk_t *p = calloc(1, sizeof *p);
 	p->mode = mode; p->baud = baud; p->reacquire = reacquire;

@@ -39,6 +39,8 @@ static void msk_reset(msk_t *m) {
 	m->evm = 1; m->good_run = 0; m->unlocked_bits = 0;
 }
 
+void msk_restart(msk_t *m) { msk_reset(m); }
+
 msk_t *msk_new(double bit_rate, double in_rate, double offset_hz, int reacquire) {
 	msk_t *m = calloc(1, sizeof *m);
 	m->baud = bit_rate; m->reacquire = reacquire;
