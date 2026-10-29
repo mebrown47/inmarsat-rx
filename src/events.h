@@ -33,7 +33,16 @@ typedef struct {
 	int les; char station[48];              // STD-C: the NCS bulletin board's station
 } channel_info_t;
 
+// STD-C signalling metadata (see stdc.h): ship is the keyed hash of its mobile number, or NULL.
+typedef struct {
+	double t_ms, freq; const char *sat;
+	int chan_les;              // The LES of the channel it was heard on (from its bulletin), or -1.
+	int desc; const char *ship;
+	int les, lc, pres, pkt_no, payload;
+} ev_stdc_sig_t;
+
 void events_acars(const ev_acars_t *e);
+void events_stdc_sig(const ev_stdc_sig_t *e);
 void events_egc(const ev_egc_t *e);
 
 #endif

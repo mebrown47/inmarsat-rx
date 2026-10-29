@@ -78,6 +78,7 @@ typedef struct {
 struct stdc {
 	stdc_egc_cb on_egc; stdc_bulletin_cb on_bulletin; void *user;
 	stdc_frame_cb on_frame; unsigned frame_counts[256], frame_bytes[256];
+	stdc_sig_t sigs[STDC_MAX_SIGS]; int nsigs;
 	float ring[FRAME_SYMBOLS]; int head, filled, since_frame;
 	stdc_stats_t stats;
 	egc_t *egc; int negc, egccap;
@@ -198,8 +199,33 @@ static void egc_packet(stdc_t *s, const uint8_t *f, int len, int second_half) {
 
 static void parse(stdc_t *s, const uint8_t *frame, int size);
 
+// Signalling layouts as public descriptions of STD-C give them (checked against the inmarsat-sniffer
+// project, GPL-3.0, as a reference only; no code copied). Long packets (descriptor bit 7 set) carry a
+// length byte after the descriptor; short ones do not. The LES byte holds the satellite in its top two
+// bits. Only the fields named here are read: never a message's contents.
+static void signalling(stdc_t *s, const uint8_t *f, int len) {
+	int d = f[0];
+	stdc_sig_t g = {.desc = d, .les = -1, .sat = -1, .lc = -1, .pres = -1, .pkt_no = -1};
+	int mes_at = -1, les_at = -1, lc_at = -1;
+	switch (d) {
+	case 0x27: case 0x2a: if (len >= 8) { mes_at = 1; les_at = 4; lc_at = 5; } break;   // channel clear, inbound message ack
+	case 0x08: if (len >= 6) { les_at = 1; lc_at = 2; } break;                         // acknowledgement request
+	case 0x81: if (len >= 17) { mes_at = 2; les_at = 5; lc_at = 9; g.pres = f[14]; } break;  // announcement
+	case 0x83: if (len >= 16) { mes_at = 2; les_at = 5; lc_at = 7; } break;            // logical channel assignment
+	case 0xa3: case 0xa8: if (len >= 9) { mes_at = 2; les_at = 5; } break;             // individual poll, confirmation
+	case 0xaa: if (len >= 7) { les_at = 2; lc_at = 3; g.pkt_no = f[4]; g.payload = len - 7; } break;  // message (size only)
+	case 0x92: case 0x9a: case 0x91: case 0xa0: case 0xad: case 0xac: break;           // counted, layout not known
+	default: return;
+	}
+	if (mes_at >= 0) { g.has_mes = 1; g.mes = (unsigned)f[mes_at] << 16 | f[mes_at + 1] << 8 | f[mes_at + 2]; }
+	if (les_at >= 0) { g.sat = f[les_at] >> 6; g.les = f[les_at] & 0x3f; }
+	if (lc_at >= 0) g.lc = f[lc_at];
+	if (s->nsigs < STDC_MAX_SIGS) s->sigs[s->nsigs++] = g;
+}
+
 static void packet(stdc_t *s, const uint8_t *f, int len) {
 	int d = f[0];
+	signalling(s, f, len);
 	if (d == 0x7d && len >= 14) {
 		int frame_number = (f[2] << 8) | f[3], sat = (f[7] >> 6) & 3;
 		stdc_bulletin_t b = {.frame_number = frame_number, .utc_seconds = frame_number * 8.64,
@@ -282,8 +308,9 @@ static void process_frame(stdc_t *s, int inverted) {
 	}
 	s->stats.frames++;
 	memset(s->frame_counts, 0, sizeof s->frame_counts); memset(s->frame_bytes, 0, sizeof s->frame_bytes);
+	s->nsigs = 0;
 	parse(s, frame, FRAME_BYTES);
-	if (s->on_frame) s->on_frame(s->frame_counts, s->frame_bytes, s->user);
+	if (s->on_frame) s->on_frame(s->frame_counts, s->frame_bytes, s->sigs, s->nsigs, s->user);
 	expire(s, 0);
 }
 

@@ -7,6 +7,7 @@
 #include "apps.h"
 #include "demod.h"
 #include "out.h"
+#include "sha256.h"
 #include "stdc.h"
 #include <math.h>
 #include <pthread.h>
@@ -248,11 +249,37 @@ static void on_egc(const stdc_egc_t *e, void *user) {
 
 // Both STD-C detectors may decode the same 8.64 s frame: count a frame once, from whichever
 // finishes it first, and ignore a second report within a few seconds.
-static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, void *user) {
+static unsigned char mobile_key[64]; static int mobile_key_len;
+void channel_set_mobile_key(const unsigned char *key, int len) {
+	mobile_key_len = len > 64 ? 64 : len;
+	memcpy(mobile_key, key, mobile_key_len);
+}
+
+// A ship's mobile number as a keyed hash: the same ship always gives the same 10 hex digits on this
+// receiver, but the number cannot be recovered or matched without the key (a plain hash would not
+// do: there are only 16 million possible numbers).
+static void mobile_hash(unsigned mes, char out[11]) {
+	unsigned char m[3] = {mes >> 16, mes >> 8, mes}, h[32];
+	hmac_sha256(mobile_key, mobile_key_len, m, 3, h);
+	for (int i = 0; i < 5; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
+}
+
+static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, const stdc_sig_t *sigs, int nsigs, void *user) {
 	channel_t *c = user;
 	if (c->tally_frame_ms && c->now - c->tally_frame_ms < 4000) return;
 	c->tally_frame_ms = c->now;
 	for (int d = 0; d < 256; d++) { c->tally_n[d] += counts[d]; c->tally_b[d] += bytes[d]; }
+	for (int i = 0; i < nsigs; i++) {
+		const stdc_sig_t *g = &sigs[i];
+		char ship[11] = "";
+		if (g->has_mes) {
+			if (!mobile_key_len) continue;  // No key: never record a number, hashed or not.
+			mobile_hash(g->mes, ship);
+		}
+		events_stdc_sig(&(ev_stdc_sig_t){.t_ms = c->now, .freq = c->freq_hz, .sat = c->sat,
+			.chan_les = c->have_station ? c->les : -1, .desc = g->desc, .ship = g->has_mes ? ship : NULL,
+			.les = g->les, .lc = g->lc, .pres = g->pres, .pkt_no = g->pkt_no, .payload = g->payload});
+	}
 }
 
 int channel_take_tally(channel_t *c, unsigned long counts[256], unsigned long bytes[256]) {

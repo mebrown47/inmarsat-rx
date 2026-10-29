@@ -124,6 +124,15 @@ def init_db(con):
             hour INTEGER, sat TEXT, freq INTEGER, desc TEXT, count INTEGER, bytes INTEGER,
             PRIMARY KEY (hour, sat, freq, desc)
         );
+        -- STD-C signalling metadata, one row per packet ("ssig" event): the packet type, the ship as
+        -- the receiver's keyed hash of its mobile number, the target LES and logical channel, and
+        -- message sizes. No message contents.
+        CREATE TABLE IF NOT EXISTS stdc_sig (
+            t INTEGER, sat TEXT, freq INTEGER, chan_les INTEGER, desc TEXT, ship TEXT,
+            les INTEGER, lc INTEGER, pres INTEGER, pkt INTEGER, bytes INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS ix_stdc_sig_t ON stdc_sig(t);
+        CREATE INDEX IF NOT EXISTS ix_stdc_sig_ship ON stdc_sig(ship);
         -- The NCS each STD-C channel belongs to, from its bulletin board.
         CREATE TABLE IF NOT EXISTS stations (
             sat TEXT, freq INTEGER, les INTEGER, station TEXT, t INTEGER,
@@ -215,6 +224,7 @@ class Agg:
         self.messages, self.cpdlcs, self.adscs, self.egcs, self.events = [], [], [], [], []
         self.stations = {}  # (sat,freq) -> (les, station, t)
         self.spkt = {}      # (hour,sat,freq,desc) -> [count, bytes]
+        self.sigs = []      # stdc_sig rows
         self.lines = self.bad = 0
 
     def add(self, d, key, n=1):
@@ -283,6 +293,9 @@ class Agg:
                     a[1] += b
                 if c.get("les") is not None:
                     self.stations[(sat, int(freq))] = (c["les"], c.get("station", ""), sec_of(ev["t"]))
+        elif e == "ssig":
+            self.sigs.append((sec_of(ev["t"]), ev.get("sat", "?"), int(ev["freq"]), ev.get("cles"), ev.get("d"),
+                              ev.get("ship"), ev.get("les"), ev.get("lc"), ev.get("pres"), ev.get("pkt"), ev.get("bytes")))
         elif e == "chan":
             self.events.append((sec_of(ev["t"]), ev.get("op"), ev.get("f"), ev.get("svc"), ev.get("sat"), ev.get("why")))
         elif e == "start":
@@ -318,6 +331,7 @@ class Agg:
         con.executemany("INSERT INTO egc(t,sat,freq,les,station,svc,service,prio,egc_id,parts,complete,rep,txt) "
                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", self.egcs)
         con.executemany("INSERT INTO chan_events VALUES(?,?,?,?,?,?)", self.events)
+        con.executemany("INSERT INTO stdc_sig VALUES(?,?,?,?,?,?,?,?,?,?,?)", self.sigs)
         con.executemany("INSERT INTO stdc_pkt_hourly VALUES(?,?,?,?,?,?) ON CONFLICT(hour,sat,freq,desc) DO UPDATE "
                         "SET count=count+excluded.count, bytes=bytes+excluded.bytes",
                         [(*k, *v) for k, v in self.spkt.items()])
