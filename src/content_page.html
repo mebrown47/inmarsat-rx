@@ -71,7 +71,8 @@ async function load(){
 }
 function render(){
   if(!D)return;
-  const M=D.deliveries,text=M.filter(m=>!m.binary),bin=M.filter(m=>m.binary),gap=M.filter(m=>m.missing),known=M.filter(m=>m.ship);
+  // Newest first by announcement time (the list arrives in the order deliveries finished).
+  const M=D.deliveries.slice().sort((a,b)=>b.t-a.t),text=M.filter(m=>!m.binary),bin=M.filter(m=>m.binary),gap=M.filter(m=>m.missing),known=M.filter(m=>m.ship);
   $("cards").innerHTML=[card("Deliveries",M.length,"last 24 h"),card("Text",text.length),card("Binary",bin.length,"size only"),
     card("Complete",M.length?Math.round(100*(M.length-gap.length)/M.length)+"%":"–",gap.length+" with gaps"),
     card("Ship known",known.length,"announcement heard"),card("Bytes",(M.reduce((a,m)=>a+m.bytes,0)/1000).toFixed(1)+" kB")].join("");
