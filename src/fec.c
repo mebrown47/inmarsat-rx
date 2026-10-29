@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Viterbi decoder and encoder, ported from the SDR Workbench (usb/stdc.js).
 #include "fec.h"
 #include <math.h>

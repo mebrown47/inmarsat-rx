@@ -1,2 +1,7 @@
 build/
 build-*/
+build-install.log
+__pycache__/
+*.db
+*.db-shm
+*.db-wal

@@ -1,7 +1,10 @@
 inmarsat-rx
-Copyright 2026 the inmarsat-rx authors. Licensed under the Apache License, Version 2.0 (LICENSE).
+Copyright (c) 2026 Mike Brown. Licensed under the GNU General Public License, version 3 or later
+(LICENSE).
 
-Ported from the SDR Workbench's decoders (Apache-2.0, same authors).
+The decoders are ported from the SDR Workbench (Apache-2.0, same author), relicensed here under
+GPL-3.0-or-later. The Observatory (observatory/) and installer are adapted from vdl2-observatory
+and iridium-observatory (GPL-3.0-or-later, same author; parts derived from iridium-sniffer).
 
 - Jonathan Olds, Copyright 2015-2019: JAERO (https://github.com/jontio/JAERO, MIT License).
   src/aero.c follows JAERO's Aero P-channel scrambler, interleaver, CRC, frame layouts (10.5k and

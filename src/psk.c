@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Coherent BPSK/QPSK/OQPSK symbol recovery, ported from the SDR Workbench (usb/psk.js).
 // Chain: front end to ~16 samples/symbol -> coarse carrier acquisition (M-th power FFT) ->
 // NCO -> channel filter -> Gardner timing recovery -> Costas carrier loop -> AGC.
@@ -96,7 +98,7 @@ static void acquire(psk_t *p, const float *iq, int n) {
 	for (int i = N / 2 - span; i <= N / 2 + span; i++) if (power[i] > power[best]) best = i;
 	double offset = (double)(best - N / 2) / N * p->rate / p->order;
 	p->freq = 2 * M_PI * offset / p->rate;
-	p->acqlen = 0; p->acquired = 1; p->unlocked_symbols = 0;
+	p->acquired = 1; p->unlocked_symbols = 0;  // acq keeps the samples: process() demodulates them next.
 	free(pw); free(power); free(seg);
 }
 
@@ -143,7 +145,11 @@ int psk_process(psk_t *p, const float *iq, int n, const float **symbols) {
 	const float *x;
 	int m = frontend_process(p->fe, iq, n, &x), count = 0;
 	*symbols = p->out;
-	if (!p->acquired) { acquire(p, x, m); return 0; }
+	if (!p->acquired) {
+		acquire(p, x, m);
+		if (!p->acquired) return 0;
+		x = p->acq; m = p->acqlen; p->acqlen = 0;  // Demodulate everything the search looked at.
+	}
 	p->buf = dsp_reserve(p->buf, &p->bufcap, (size_t)2 * (p->buflen + m), sizeof(float));
 	p->out = dsp_reserve(p->out, &p->outcap, (size_t)2 * (m / (p->sps * 0.98) + 4), sizeof(float));
 	// OQPSK looks back an extra half symbol for the I sample.

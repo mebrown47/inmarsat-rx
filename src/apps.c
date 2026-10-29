@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // libacars glue, following the SDR Workbench (wasm/acars-shim.c, usb/acars-apps.js). The summary
 // picks every CPDLC element's choice_label and the first position anywhere in the tree.
 #include "apps.h"

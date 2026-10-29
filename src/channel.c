@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Channels and their JSON records. The record shape is the SDR Workbench message log's
 // (log/records.js, v1), so the same tools read both.
 #include "channel.h"
@@ -17,6 +19,7 @@
 
 struct channel {
 	channel_kind_t kind; double freq_hz; channel_opts_t opts;
+	char sat[24]; int found;
 	psk_t *psk; msk_t *msk;
 	aero_t *aero;
 	stdc_t *stdc_diff, *stdc_coh; float prev_re, prev_im;
@@ -25,6 +28,7 @@ struct channel {
 	int have_station, les; char station[48];
 	// EGC messages already emitted: both STD-C paths report the same message.
 	struct { char key[96]; double at; } recent[RECENT]; int recent_next;
+	long egc_count;
 };
 
 static pthread_mutex_t apps_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -61,7 +65,6 @@ static void record_head(jbuf_t *b, const channel_t *c, const char *key, const ch
 static void on_acars(const aero_acars_t *m, void *user) {
 	channel_t *c = user;
 	int ack = !strcmp(m->label, "_d");
-	if (ack && c->opts.hide_acks) return;
 	apps_t apps; int has_app = 0;
 	if (m->text[0]) {
 		pthread_mutex_lock(&apps_lock);  // libacars is not documented as thread-safe.
@@ -70,6 +73,12 @@ static void on_acars(const aero_acars_t *m, void *user) {
 	}
 	const char *reg = m->reg;
 	while (*reg == '.') reg++;
+	char block[2] = {m->block, 0};
+	events_acars(&(ev_acars_t){.t_ms = c->now, .freq = c->freq_hz, .sat = c->sat, .type = channel_kind_name(c->kind),
+		.aes = m->aes, .ges = m->ges, .reg = reg, .label = m->label, .text = m->text, .block = m->block, .mode = m->mode,
+		.more = m->more, .ack = ack, .app_kind = has_app ? apps.kind : NULL, .app_summary = has_app ? apps.summary : NULL,
+		.tree_json = has_app ? apps.json : NULL, .app_error = has_app && apps.error});
+	if (ack && c->opts.hide_acks) { if (has_app) apps_free(&apps); return; }
 	char key[96], h[8], to[32], from[16];
 	fnv36(m->text, h);
 	snprintf(key, sizeof key, "aero:%s:%s:%c:%s", m->aes, m->label, m->block, h);
@@ -84,7 +93,6 @@ static void on_acars(const aero_acars_t *m, void *user) {
 	jb_key(&b, "from"); jb_str(&b, from);
 	jb_key(&b, "to"); jb_str(&b, to);
 	jb_key(&b, "label"); jb_str(&b, m->label);
-	char block[2] = {m->block, 0};
 	jb_key(&b, "block"); jb_str(&b, block);
 	jb_key(&b, "app");
 	if (has_app) {
@@ -103,7 +111,9 @@ static void on_acars(const aero_acars_t *m, void *user) {
 	else jb_raw(&b, "null");
 	char mode[2] = {m->mode, 0}, tak[2] = {m->tak, 0};
 	jb_key(&b, "meta"); jb_raw(&b, "{"); jb_key(&b, "mode"); jb_str(&b, mode); jb_key(&b, "tak"); jb_str(&b, tak);
-	jb_key(&b, "rate"); jb_printf(&b, "%d", aero_rate(c->kind)); jb_key(&b, "more"); jb_raw(&b, m->more ? "true" : "false");
+	jb_key(&b, "rate"); jb_printf(&b, "%d", aero_rate(c->kind));
+	jb_key(&b, "sat"); jb_str(&b, c->sat); jb_key(&b, "channel"); jb_str(&b, channel_kind_name(c->kind));
+	jb_key(&b, "more"); jb_raw(&b, m->more ? "true" : "false");
 	jb_raw(&b, "}}");
 	out_emit(b.s);
 	jb_free(&b);
@@ -138,6 +148,11 @@ static void on_egc(const stdc_egc_t *e, void *user) {
 		if (c->recent[i].at && c->now - c->recent[i].at < RECENT_MS && !strcmp(c->recent[i].key, dedupe)) return;
 	snprintf(c->recent[c->recent_next].key, sizeof c->recent[0].key, "%s", dedupe);
 	c->recent[c->recent_next].at = c->now; c->recent_next = (c->recent_next + 1) % RECENT;
+	c->egc_count++;
+	events_egc(&(ev_egc_t){.t_ms = c->now, .freq = c->freq_hz, .sat = c->sat, .les = c->have_station ? c->les : -1,
+		.station = c->have_station ? c->station : NULL, .service = e->service, .id = e->id, .parts = e->parts,
+		.complete = e->complete, .repetition = e->repetition, .service_name = e->service_name, .priority = e->priority,
+		.text = e->text});
 	jbuf_t b = {0};
 	record_head(&b, c, key, "stdc", "egc", 0);
 	jb_key(&b, "aircraft"); jb_raw(&b, "null");
@@ -157,7 +172,8 @@ static void on_egc(const stdc_egc_t *e, void *user) {
 	jb_key(&b, "position"); jb_raw(&b, "null");
 	jb_key(&b, "text"); jb_str(&b, e->text);
 	jb_key(&b, "decode"); jb_raw(&b, "null");
-	jb_key(&b, "meta"); jb_printf(&b, "{\"serviceCode\":%d,\"repetition\":%d}}", e->service, e->repetition);
+	jb_key(&b, "meta"); jb_printf(&b, "{\"serviceCode\":%d,\"repetition\":%d,\"sat\":", e->service, e->repetition);
+	jb_str(&b, c->sat); jb_raw(&b, "}}");
 	out_emit(b.s);
 	jb_free(&b);
 }
@@ -177,9 +193,11 @@ static void on_bulletin(const stdc_bulletin_t *e, void *user) {
 	jb_free(&b);
 }
 
-channel_t *channel_new(channel_kind_t kind, double freq_hz, double center_hz, double rate, const channel_opts_t *opts) {
+channel_t *channel_new(channel_kind_t kind, double freq_hz, const char *sat, int found, double center_hz, double rate,
+	const channel_opts_t *opts) {
 	channel_t *c = calloc(1, sizeof *c);
-	c->kind = kind; c->freq_hz = freq_hz; c->opts = *opts;
+	c->kind = kind; c->freq_hz = freq_hz; c->opts = *opts; c->found = found;
+	snprintf(c->sat, sizeof c->sat, "%s", sat && *sat ? sat : "?");
 	double offset = freq_hz - center_hz;
 	switch (kind) {
 	case CH_STDC:
@@ -250,5 +268,25 @@ void channel_status(const channel_t *c, char *buf, int size) {
 		snprintf(buf + n, size - n, " | %s frames %ld (+%ld dropped) ber %.1f%% packets %ld/%ld%s%s", best->synced ? "SYNC" : "----",
 			best->frames, best->dropped, best->ber < 0 ? 0 : best->ber * 100, best->packets_ok, best->packets_bad,
 			c->have_station ? " " : "", c->have_station ? c->station : "");
+	}
+}
+
+double channel_freq(const channel_t *c) { return c->freq_hz; }
+channel_kind_t channel_kind(const channel_t *c) { return c->kind; }
+
+void channel_info(const channel_t *c, channel_info_t *i) {
+	demod_status_t d = c->msk ? msk_status(c->msk) : psk_status(c->psk);
+	*i = (channel_info_t){.freq = c->freq_hz, .sat = c->sat, .type = channel_kind_name(c->kind), .found = c->found,
+		.acquired = d.acquired, .locked = d.locked, .snr_db = d.snr_db, .offset_hz = d.offset_hz, .les = -1};
+	if (c->aero) {
+		aero_stats_t a = aero_stats(c->aero);
+		i->synced = a.synced; i->ber = a.ber; i->frames = a.frames; i->units_ok = a.su_ok; i->units_bad = a.su_bad;
+		i->messages = a.messages;
+	} else {
+		stdc_stats_t a = stdc_stats(c->stdc_diff), b = stdc_stats(c->stdc_coh);
+		const stdc_stats_t *best = a.synced || (!b.synced && a.frames >= b.frames) ? &a : &b;
+		i->synced = best->synced; i->ber = best->ber; i->frames = best->frames; i->units_ok = best->packets_ok;
+		i->units_bad = best->packets_bad; i->messages = c->egc_count;
+		if (c->have_station) { i->les = c->les; snprintf(i->station, sizeof i->station, "%s", c->station); }
 	}
 }

@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // File and stdin input, with SigMF metadata when present.
 #define _GNU_SOURCE
 #include "input.h"

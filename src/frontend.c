@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Channel front end: mix the channel to 0 Hz, then two decimation stages.
 #include "demod.h"
 #include <math.h>

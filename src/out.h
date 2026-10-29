@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // JSON line output: a small string builder plus the sinks (stdout, UDP). Thread-safe emit.
 #ifndef OUT_H
 #define OUT_H

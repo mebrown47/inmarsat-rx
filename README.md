@@ -52,6 +52,38 @@ sample rate that covers them; `-F` and `-s` override. `inmarsat-rx -h` lists eve
 Status per channel goes to stderr every 30 s of samples (`--stats`): lock, carrier offset, SNR,
 frames, channel BER, signal units or packets, messages.
 
+## Dashboard
+
+Like iridium-observatory and vdl2-observatory, inmarsat-rx comes with two pages:
+
+| Port | What | Shows |
+|---|---|---|
+| 8892 | **Live** (`inmarsat-rx --web 8892`) | what the receiver hears now: every channel by satellite and service (sync, SNR, BER, units OK), ACARS with CPDLC/ADS-C decoded, aircraft, ground stations, STD-C EGC |
+| 8893 | **Observatory** (`observatory/server.py`) | history from the archive: Overview (traffic by service, channel health per satellite, ground stations, busiest aircraft, channels `--scan` added), Aviation (per-aircraft history, CPDLC and ADS-C logs), Maritime (EGC by priority) |
+
+Every record carries a satellite and a service (Aero-H+, Aero-L 600/1200, STD-C), and both pages
+filter by either. The Observatory reads a database that `observatory/rollup.py` folds from the
+archive (`--archive DIR`), once a minute under systemd.
+
+```bash
+./install.sh          # packages, build, tests, then the three services; asks a few questions
+```
+
+It asks for the source (`airspy`, `hackrf`, `rtl_tcp:HOST:PORT`, `spyserver:HOST:PORT`), the
+satellite plans, gain, bias-tee, whether to scan for more carriers, UDP feeds and a station name,
+and writes them to `/etc/inmarsat-observatory.conf`. `./install.sh --update`, `--reconfigure`,
+`--uninstall` and `--dry-run` work as vdl2-observatory's do. One SDR serves one program: on a box
+where iridium-sniffer already has the Airspy, give inmarsat-rx its own SDR.
+
+## Channels
+
+`--plan i4f3` (or `i3f5`, `alphasat`, several comma-separated, or `all`) takes a satellite's known
+carriers; those outside the tuned band are skipped. `--plans` lists them. `--scan` averages the
+spectrum, tries every carrier above the noise as the types its width allows (0.9 kHz: Aero-L 600;
+1.5–2.5 kHz: Aero-L 1200 or STD-C; ~10 kHz: Aero-H+), keeps those that reach frame sync, and drops
+them again after 15 minutes without frames. On the 120 s I-4 F3 test recording it found 1545.195
+and 1545.205, two Aero-L 600 carriers missing from the plan.
+
 ## Output
 
 One JSON object per line, the SDR Workbench message-log record (v1):
@@ -73,6 +105,7 @@ One JSON object per line, the SDR Workbench message-log record (v1):
   `complete: false` and `[…]` where parts are missing.
 - `--data` adds non-ACARS Aero user data (hex), `--bulletins` the STD-C bulletin board of every
   frame.
+- `meta.sat` and `meta.channel` name the satellite and service of every record.
 - `--blocks` writes one record per ACARS block instead of joining multi-block messages
   (`meta.more` is true on blocks that end with ETB), as acarsdec-style feeds do.
 - Record times count from the first sample: SigMF `core:datetime`, else `--start TIME` for a raw
@@ -92,4 +125,4 @@ blocked (`--block`).
 
 ## Credits
 
-See NOTICE. Apache License 2.0.
+See NOTICE. GNU General Public License v3.0 or later.

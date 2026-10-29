@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Mike Brown
+// SPDX-License-Identifier: GPL-3.0-or-later
 // Live IQ sources: Airspy R2/Mini and HackRF over USB (libairspy / libhackrf), and rtl_tcp and
 // SpyServer over the network. Each feeds a ring buffer that read() drains; samples that arrive
 // while the ring is full are dropped and counted.

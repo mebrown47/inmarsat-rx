@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inmarsat live</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--line:#2b333d;--grid:#222a33;
+    --fg:#e6edf3;--dim:#8b98a5;--accent:#4aa8ff;--good:#3fb950;--warn:#d29922;--hot:#f778ba;
+    --h:#4aa8ff;--l6:#3fb950;--l12:#a371f7;--c:#d29922}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:14px 22px;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:18px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:12.5px}
+  header .spacer{flex:1}
+  .nav{display:flex;gap:4px}
+  .nav a{color:var(--dim);text-decoration:none;font-size:13px;padding:4px 11px;
+    border-radius:6px;border:1px solid transparent}
+  .nav a:hover{color:var(--fg)}
+  .nav a.on{color:var(--fg);background:var(--panel2);border-color:var(--line)}
+  .nav a[hidden]{display:none}
+  .status{color:var(--dim);font-size:12px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);
+    margin-right:5px;vertical-align:middle}
+  main{padding:16px 22px;max-width:1500px;margin:0 auto}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .card .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .card .v{font-size:24px;font-weight:600;margin-top:3px}
+  .card .v small{font-size:12.5px;color:var(--dim);font-weight:400}
+  .filters{display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-bottom:14px;font-size:12.5px;color:var(--dim)}
+  .chips{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
+  .chips span.lab{margin-right:4px;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
+  .chips button{background:transparent;color:var(--dim);border:1px solid var(--line);border-radius:6px;
+    padding:3px 10px;font:inherit;cursor:pointer}
+  .chips button:hover{color:var(--fg)}
+  .chips button.on{color:var(--fg);background:var(--panel2);border-color:var(--accent)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    margin-bottom:14px;min-width:0}
+  .panel h2{font-size:13px;margin:0 0 8px;font-weight:600;display:flex;justify-content:space-between;
+    gap:8px;flex-wrap:wrap}
+  .panel h2 .hint{color:var(--dim);font-weight:400;font-size:11.5px}
+  .panel h3{font-size:12.5px;margin:12px 0 4px;font-weight:600;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .panel h3:first-of-type{margin-top:2px}
+  .panel h3 .hint{color:var(--dim);font-weight:400;font-size:11.5px}
+  .grid{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:14px}
+  @media(max-width:1000px){.grid{grid-template-columns:minmax(0,1fr)}}
+  .scroll{max-height:460px;overflow:auto}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;
+    letter-spacing:.5px;padding:5px 7px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  th.r,td.r{text-align:right}
+  td{padding:5px 7px;border-bottom:1px solid #1b2129;vertical-align:top;white-space:nowrap}
+  td.body{white-space:normal;overflow-wrap:anywhere;min-width:240px}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .kv td:first-child{color:var(--dim);white-space:nowrap;width:1%;padding-right:14px}
+  .ok{color:var(--good)}.warnc{color:var(--warn)}.hotc{color:var(--hot)}
+  .n{color:var(--dim);font-variant-numeric:tabular-nums}
+  .svc{font-size:10.5px;padding:1px 6px;border-radius:4px;border:1px solid}
+  .svc.aero{color:var(--h);border-color:#1f4a73}
+  .svc.aerol600{color:var(--l6);border-color:#1f4f2b}
+  .svc.aerol1200{color:var(--l12);border-color:#43306b}
+  .svc.stdc{color:var(--c);border-color:#5c4513}
+  .app{font-size:10.5px;padding:1px 5px;border-radius:4px;background:#2a1830;color:var(--hot);margin-right:5px}
+  .app.adsc{background:#2b2410;color:var(--warn)}
+  .prio{font-size:10.5px;padding:1px 5px;border-radius:4px;background:var(--panel2);color:var(--dim)}
+  .prio.Safety{color:var(--warn)}.prio.Urgency{color:var(--hot)}.prio.Distress{background:#3d1520;color:#ff7b8b}
+  .st i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle;background:var(--line)}
+  .st.sync i{background:var(--good)}.st.lock i{background:var(--warn)}
+  .fresh td{animation:fresh 2.5s ease-out}
+  @keyframes fresh{from{background:#1d3a5c}to{background:transparent}}
+  .empty{color:var(--dim);padding:20px;text-align:center;font-size:13px}
+  .bar{display:inline-block;height:6px;border-radius:3px;background:var(--good);vertical-align:middle;margin-right:6px}
+</style></head>
+<body>
+<header>
+  <h1>Inmarsat live</h1>
+  <nav class="nav"><a href="/" class="on">Live</a><a id="obslink" href="#" hidden>Observatory</a></nav>
+  <span class="sub" id="sub">inmarsat-rx</span>
+  <span class="spacer"></span>
+  <span class="status" id="status"><span class="dot"></span>loading…</span>
+</header>
+<main>
+  <div class="cards" id="cards"></div>
+  <div class="filters">
+    <div class="chips" id="fsat"></div>
+    <div class="chips" id="fsvc"></div>
+    <div class="chips" id="fack"></div>
+  </div>
+  <div class="panel">
+    <h2>Satellites and channels <span class="hint">since the receiver started · units: Aero signal units or STD-C packets with a good checksum</span></h2>
+    <div id="chans"></div>
+  </div>
+  <div class="grid">
+    <div class="panel">
+      <h2>ACARS <span class="hint">newest first; P-channel, ground to aircraft</span></h2>
+      <div class="scroll" id="msgs"></div>
+    </div>
+    <div class="panel">
+      <h2>Aircraft <span class="hint">heard in the last 30 minutes</span></h2>
+      <div class="scroll" id="acft"></div>
+    </div>
+  </div>
+  <div class="grid">
+    <div class="panel">
+      <h2>Maritime safety <span class="hint">STD-C EGC broadcasts: SafetyNET and FleetNET</span></h2>
+      <div class="scroll" id="egc"></div>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Ground stations <span class="hint">GES sending to aircraft, since the receiver started</span></h2>
+        <div id="ges"></div>
+      </div>
+      <div class="panel">
+        <h2>Receiver <span class="hint">the SDR and its samples</span></h2>
+        <div id="rx"></div>
+      </div>
+    </div>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let D=null,seen=new Set(),firstLoad=true;
+const F={sat:"all",svc:"all",acks:false};
+try{Object.assign(F,JSON.parse(localStorage.getItem("inmarsat-live-filters")||"{}"));}catch(e){}
+const SVC={aero:"Aero-H+ 10.5k",aerol600:"Aero-L 600",aerol1200:"Aero-L 1200",stdc:"STD-C"};
+const SVCGROUP={aero:"aero",aerol600:"aerol",aerol1200:"aerol",stdc:"stdc"};
+const ORDER=["stdc","aero","aerol1200","aerol600"];
+function esc(s){return (s==null?"":""+s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function hms(t){const d=new Date(t*1000),p=x=>String(x).padStart(2,"0");
+  return p(d.getUTCHours())+":"+p(d.getUTCMinutes())+":"+p(d.getUTCSeconds());}
+function ago(s){s=Math.max(0,Math.round(s));if(s<60)return s+" s";if(s<3600)return Math.round(s/60)+" min";
+  return (s/3600).toFixed(1)+" h";}
+function fmt(n){return n>=1e4?(n/1e3).toFixed(1)+"k":""+n;}
+function mhz(f){return (f/1e6).toFixed(4);}
+function card(k,v,sub){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+
+  (sub?' <small>'+sub+'</small>':'')+'</div></div>';}
+function svc(t){return '<span class="svc '+t+'">'+(SVC[t]||t)+'</span>';}
+function satName(id){const s=(D.satellites||[]).find(x=>x.id===id);return s?s.name:id;}
+function keep(sat,type){return (F.sat==="all"||F.sat===sat)&&(F.svc==="all"||F.svc===SVCGROUP[type]);}
+function save(){try{localStorage.setItem("inmarsat-live-filters",JSON.stringify(F));}catch(e){}}
+function chips(id,label,opts,cur,set){
+  $(id).innerHTML='<span class="lab">'+label+'</span>'+opts.map(([v,t])=>'<button data-v="'+esc(v)+'"'+(v===cur?' class="on"':'')+'>'+esc(t)+'</button>').join("");
+  $(id).querySelectorAll("button").forEach(b=>b.onclick=()=>{set(b.dataset.v);save();render();});
+}
+async function load(){
+  try{const r=await fetch("/api/state",{cache:"no-store"});D=await r.json();render();}
+  catch(e){$("status").innerHTML='<span class="dot" style="background:var(--warn)"></span>receiver not answering';}
+}
+function samehost(port){const h=location.hostname;return location.protocol+"//"+(h.includes(":")?"["+h+"]":h)+":"+port+"/";}
+function render(){
+  const ol=$("obslink");if(D.observatory_port){ol.href=samehost(D.observatory_port);ol.hidden=false;}else ol.hidden=true;
+  const now=D.latest||D.now,age=D.latest?D.now-D.latest:null;
+  $("status").innerHTML='<span class="dot" style="background:'+(age!=null&&age<600?'var(--good)':'var(--warn)')+
+    '"></span>'+(age==null?'no messages yet':'last message '+ago(age)+' ago')+' · up '+ago(D.now-D.started);
+  const sats=[...new Set(D.channels.map(c=>c.sat))];
+  $("sub").textContent=(D.station_id?D.station_id+" · ":"")+D.channels.length+" channels on "+sats.length+
+    " satellite"+(sats.length==1?"":"s")+" · "+mhz(D.receiver.centre)+" MHz ± "+(D.receiver.rate/2e3).toFixed(0)+" kHz";
+  chips("fsat","Satellite",[["all","All"],...sats.map(s=>[s,satName(s)])],F.sat,v=>F.sat=v);
+  const groups=[...new Set(D.channels.map(c=>SVCGROUP[c.type]))];
+  chips("fsvc","Service",[["all","All"],...[["aero","Aero-H+"],["aerol","Aero-L"],["stdc","STD-C"]].filter(g=>groups.includes(g[0]))],F.svc,v=>F.svc=v);
+  chips("fack","Acknowledgements",[["hide","Hide"],["show","Show"]],F.acks?"show":"hide",v=>F.acks=v==="show");
+
+  const A=D.aircraft.filter(a=>a.sats.split(" ").some(s=>F.sat==="all"||s===F.sat)&&a.types.split(" ").some(t=>F.svc==="all"||SVCGROUP[t]===F.svc));
+  const recent=A.filter(a=>now-a.last<600).length;
+  const CH=D.channels.filter(c=>keep(c.sat,c.type)),synced=CH.filter(c=>c.synced).length;
+  const M=D.messages.filter(m=>keep(m.sat,m.type));
+  const acars=M.filter(m=>!m.egc),egc=M.filter(m=>m.egc);
+  const cards=[card("Aircraft",recent,"last 10 min · "+A.length+" in 2 h")];
+  if(F.sat==="all"&&F.svc==="all"){const c=D.counts;
+    cards.push(card("ACARS",fmt(c.acars),fmt(c.acks)+" acks"),card("CPDLC",'<span class="hotc">'+fmt(c.cpdlc)+'</span>'),
+      card("ADS-C",fmt(c.adsc),"contracts"),card("EGC",fmt(c.egc),"safety broadcasts"));}
+  else cards.push(card("Messages",fmt(acars.length+egc.length),"of the latest "+D.messages.length));
+  cards.push(card("Channels",synced+" / "+CH.length,"in frame sync"),card("Satellites",sats.length));
+  $("cards").innerHTML=cards.join("");
+
+  // Channels grouped by satellite, then service.
+  let h="";
+  for(const s of sats){
+    if(F.sat!=="all"&&F.sat!==s)continue;
+    const cs=CH.filter(c=>c.sat===s).sort((a,b)=>ORDER.indexOf(a.type)-ORDER.indexOf(b.type)||a.freq-b.freq);
+    if(!cs.length)continue;
+    const sd=(D.satellites||[]).find(x=>x.id===s),ncs=cs.find(c=>c.station);
+    h+='<h3>'+esc(satName(s))+'<span class="hint">'+(sd?esc(sd.slot+" · "+sd.region):"")+
+      (ncs?" · NCS "+esc(ncs.station):"")+'</span></h3><table><tr><th>MHz</th><th>Service</th><th>State</th><th class="r">SNR</th>'+
+      '<th class="r">Offset</th><th class="r">BER</th><th class="r">Frames</th><th class="r">Units OK</th><th class="r">Messages</th></tr>';
+    for(const c of cs){
+      const st=c.synced?["sync","in sync"]:c.locked?["lock","locked, no frames"]:c.acquired?["","tracking"]:["","searching"];
+      const tot=c.ok+c.bad,pct=tot?100*c.ok/tot:0;
+      h+='<tr><td class="mono">'+mhz(c.freq)+(c.found?' <span class="n" title="added by --scan">·scan</span>':'')+'</td><td>'+svc(c.type)+
+        '</td><td><span class="st '+st[0]+'"><i></i>'+st[1]+'</span></td><td class="r n">'+(c.acquired?c.snr.toFixed(1)+" dB":"–")+
+        '</td><td class="r n">'+(c.acquired?(c.offset>=0?"+":"")+c.offset.toFixed(0)+" Hz":"–")+'</td><td class="r n">'+
+        (c.ber==null?"–":(100*c.ber).toFixed(1)+"%")+'</td><td class="r n">'+fmt(c.frames)+'</td><td class="r n">'+
+        (tot?'<span class="bar" style="width:'+Math.round(pct/2.5)+'px;background:'+(pct>95?'var(--good)':pct>80?'var(--warn)':'var(--hot)')+
+        '"></span>'+pct.toFixed(1)+'%':"–")+'</td><td class="r">'+fmt(c.msgs)+'</td></tr>';
+    }
+    h+='</table>';
+  }
+  $("chans").innerHTML=h||'<div class="empty">no channels for this filter</div>';
+
+  const rows=acars.filter(m=>F.acks||!m.ack).slice(0,150);
+  $("msgs").innerHTML=rows.length?'<table><tr><th>UTC</th><th>Sat</th><th>Service</th><th>Tail</th><th>AES</th><th>GES</th><th>Lbl</th><th>Text</th></tr>'+
+    rows.map(m=>{const k="a"+m.t+m.aes+m.lbl+m.blk+m.txt.length,fr=!firstLoad&&!seen.has(k);seen.add(k);
+      const app=m.app?'<span class="app'+(m.app==="ADS-C"?" adsc":"")+'">'+esc(m.app)+'</span>'+esc(m.app_sum)+'<br>':"";
+      return '<tr'+(fr?' class="fresh"':'')+'><td class="mono n">'+hms(m.t)+'</td><td>'+esc(satName(m.sat))+'</td><td>'+svc(m.type)+
+        '</td><td class="mono">'+esc(m.reg)+'</td><td class="mono n">'+esc(m.aes)+'</td><td class="mono n">'+esc(m.ges)+
+        '</td><td class="mono">'+esc(m.lbl)+'</td><td class="body mono">'+app+(m.txt?esc(m.txt):'<span class="n">—</span>')+'</td></tr>';}).join("")+'</table>'
+    :'<div class="empty">no ACARS for this filter yet</div>';
+
+  const AC=A.filter(a=>now-a.last<1800).sort((a,b)=>b.last-a.last);
+  $("acft").innerHTML=AC.length?'<table><tr><th>Tail</th><th>AES</th><th>GES</th><th>Heard on</th><th class="r">Msgs</th><th class="r">Heard</th></tr>'+
+    AC.map(a=>'<tr><td class="mono">'+esc(a.reg||"—")+'</td><td class="mono n">'+esc(a.aes)+'</td><td class="mono n">'+esc(a.ges)+
+      '</td><td>'+a.types.split(" ").map(svc).join(" ")+(a.sats.includes(" ")?' <span class="n">'+a.sats.split(" ").map(satName).join(", ")+'</span>':'')+
+      '</td><td class="r">'+a.msgs+(a.cpdlc?' <span class="hotc" title="CPDLC">◆</span>':'')+'</td><td class="r n">'+ago(now-a.last)+'</td></tr>').join("")+'</table>'
+    :'<div class="empty">no aircraft in the last 30 minutes</div>';
+
+  $("egc").innerHTML=egc.length?'<table><tr><th>UTC</th><th>Station</th><th>Priority</th><th>Service</th><th>Text</th></tr>'+
+    egc.slice(0,60).map(m=>'<tr><td class="mono n">'+hms(m.t)+'</td><td>'+esc(m.station||satName(m.sat))+'</td><td><span class="prio '+esc(m.prio)+'">'+esc(m.prio)+
+      '</span></td><td>'+esc(m.service_name)+(m.complete?'':' <span class="warnc" title="parts missing">incomplete</span>')+
+      '</td><td class="body mono">'+esc(m.txt.slice(0,600))+(m.txt.length>600?"…":"")+'</td></tr>').join("")+'</table>'
+    :'<div class="empty">'+(D.channels.some(c=>c.type==="stdc")?"no EGC broadcast received yet":"no STD-C channel in this setup")+'</div>';
+
+  const G=D.ges.filter(g=>F.sat==="all"||g.sats.split(" ").includes(F.sat)).sort((a,b)=>b.msgs-a.msgs);
+  $("ges").innerHTML=G.length?'<table><tr><th>GES</th><th>Satellites</th><th class="r">Messages</th><th class="r">Aircraft (2 h)</th><th class="r">Last</th></tr>'+
+    G.map(g=>'<tr><td class="mono">'+esc(g.id)+'</td><td class="n">'+g.sats.split(" ").map(satName).join(", ")+'</td><td class="r">'+fmt(g.msgs)+
+      '</td><td class="r">'+g.aircraft+'</td><td class="r n">'+ago(now-g.last)+'</td></tr>').join("")+'</table>'
+    :'<div class="empty">none yet</div>';
+
+  const r=D.receiver,drop=r.dropped;
+  $("rx").innerHTML='<table class="kv"><tr><td>Source</td><td>'+esc(r.name)+'</td></tr><tr><td>Gain</td><td>'+esc(r.gain)+
+    (r.bias?' · <span class="warnc">bias-tee on</span>':' · bias-tee off')+'</td></tr><tr><td>Tuned</td><td>'+mhz(r.centre)+
+    ' MHz <span class="n">· '+(r.rate/1e6).toFixed(r.rate<1e6?4:2)+' MS/s</span></td></tr><tr><td>Samples</td><td class="n">'+
+    (r.samples/r.rate/3600).toFixed(1)+' h of input</td></tr><tr><td>Dropped</td><td>'+(drop?'<span class="warnc">'+fmt(drop)+
+    ' samples</span>':'<span class="ok">none</span>')+'</td></tr></table>';
+  firstLoad=false;
+}
+load();setInterval(load,4000);
+</script>
+</body></html>
