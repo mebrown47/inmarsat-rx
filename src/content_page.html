@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STD-C messages (local)</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b22;--panel2:#1c232c;--line:#2b333d;--fg:#e6edf3;--dim:#8b98a5;
+    --accent:#4aa8ff;--good:#3fb950;--warn:#d29922;--hot:#f778ba}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:14px 22px;border-bottom:1px solid var(--line);background:var(--panel)}
+  header h1{font-size:18px;margin:0;font-weight:650}
+  header .sub{color:var(--dim);font-size:12.5px}
+  header .spacer{flex:1}
+  .status{color:var(--dim);font-size:12px}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:5px;vertical-align:middle}
+  main{padding:16px 22px;max-width:1500px;margin:0 auto}
+  .notice{border:1px solid #5c4513;background:#1f1a0e;color:#e3c27a;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12.5px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  .card .k{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .card .v{font-size:24px;font-weight:600;margin-top:3px}
+  .card .v small{font-size:12.5px;color:var(--dim);font-weight:400}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:14px;min-width:0}
+  .panel h2{font-size:13px;margin:0 0 8px;font-weight:600;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .panel h2 .hint{color:var(--dim);font-weight:400;font-size:11.5px}
+  .tools{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  input,select{background:var(--bg);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit;font-size:12.5px}
+  input{min-width:260px}
+  table{width:100%;border-collapse:collapse;font-size:12.5px}
+  th{text-align:left;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;padding:5px 7px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--panel)}
+  th.r,td.r{text-align:right}
+  td{padding:6px 7px;border-bottom:1px solid #1b2129;vertical-align:top;white-space:nowrap}
+  td.body{white-space:pre-wrap;overflow-wrap:anywhere;min-width:300px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .n{color:var(--dim);font-variant-numeric:tabular-nums}
+  .warnc{color:var(--warn)}.ok{color:var(--good)}
+  .empty{color:var(--dim);padding:20px;text-align:center;font-size:13px}
+</style></head>
+<body>
+<header>
+  <h1>STD-C messages</h1>
+  <span class="sub">shore to ship, local only</span>
+  <span class="spacer"></span>
+  <span class="status" id="status"><span class="dot"></span>loading…</span>
+</header>
+<main>
+  <div class="notice" id="notice">Messages addressed to individual ships. This page is served on 127.0.0.1 only: reach it through an SSH tunnel. Deliveries are kept 24 hours and are not archived, fed or shown on the shared pages. Ships appear as this receiver's keyed hash of their mobile number.</div>
+  <div class="cards" id="cards"></div>
+  <div class="panel">
+    <h2>Deliveries <span class="hint">newest first; [&hellip;] marks packets not received; binary content is shown by size only</span></h2>
+    <div class="tools"><input id="q" placeholder="search text or ship hash" autocomplete="off"><select id="les"></select><select id="kind"><option value="">all</option><option value="text">text</option><option value="binary">binary</option><option value="gaps">with gaps</option></select></div>
+    <div id="rows"></div>
+  </div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let D=null;
+function esc(s){return (s==null?"":""+s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function pad(x){return String(x).padStart(2,"0");}
+function dt(ms){const d=new Date(ms);return pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())+" "+pad(d.getUTCHours())+":"+pad(d.getUTCMinutes())+":"+pad(d.getUTCSeconds());}
+function card(k,v,sub){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+(sub?' <small>'+sub+'</small>':'')+'</div></div>';}
+const SAT={i4f3:"I-4 F3",i3f5:"I-3 F5",alphasat:"Alphasat","?":"Unassigned"};
+async function load(){
+  try{D=await (await fetch("/api/deliveries",{cache:"no-store"})).json();}
+  catch(e){$("status").innerHTML='<span class="dot" style="background:var(--warn)"></span>receiver not answering';return;}
+  $("status").innerHTML='<span class="dot"></span>'+D.deliveries.length+' in the last 24 h · '+D.open+' open · kept in '+esc(D.dir);
+  const les=[...new Set(D.deliveries.map(m=>m.sat+":"+m.les))].sort(),cur=$("les").value;
+  $("les").innerHTML='<option value="">all LES</option>'+les.map(k=>{const[s,l]=k.split(":");return '<option value="'+esc(k)+'"'+(k===cur?" selected":"")+'>'+esc((SAT[s]||s)+" LES "+l)+'</option>';}).join("");
+  render();
+}
+function render(){
+  if(!D)return;
+  const M=D.deliveries,text=M.filter(m=>!m.binary),bin=M.filter(m=>m.binary),gap=M.filter(m=>m.missing),known=M.filter(m=>m.ship);
+  $("cards").innerHTML=[card("Deliveries",M.length,"last 24 h"),card("Text",text.length),card("Binary",bin.length,"size only"),
+    card("Complete",M.length?Math.round(100*(M.length-gap.length)/M.length)+"%":"–",gap.length+" with gaps"),
+    card("Ship known",known.length,"announcement heard"),card("Bytes",(M.reduce((a,m)=>a+m.bytes,0)/1000).toFixed(1)+" kB")].join("");
+  const q=$("q").value.trim().toLowerCase(),les=$("les").value,kind=$("kind").value;
+  const R=M.filter(m=>(!les||m.sat+":"+m.les===les)&&(!kind||(kind==="text"&&!m.binary)||(kind==="binary"&&m.binary)||(kind==="gaps"&&m.missing))&&
+    (!q||(m.text||"").toLowerCase().includes(q)||(m.ship||"").includes(q)));
+  $("rows").innerHTML=R.length?'<table><tr><th>UTC</th><th>Satellite</th><th>LES</th><th>Ship (hash)</th><th class="r">Packets</th><th class="r">Bytes</th><th>Message</th></tr>'+
+    R.map(m=>'<tr><td class="mono n">'+dt(m.t)+'</td><td>'+esc(SAT[m.sat]||m.sat)+'</td><td class="mono">'+m.les+' <span class="n">ch '+m.lc+'</span></td><td class="mono n">'+esc(m.ship||"unknown")+
+      '</td><td class="r">'+m.packets+(m.missing?' <span class="warnc">−'+m.missing+'</span>':'')+'</td><td class="r n">'+m.bytes+
+      '</td><td class="body">'+(m.binary?'<span class="n">binary, '+m.bytes+' bytes</span>':esc(m.text))+'</td></tr>').join("")+'</table>'
+    :'<div class="empty">'+(M.length?"no deliveries match":"no deliveries yet — messages to ships are announced a few times an hour per LES")+'</div>';
+}
+["q","les","kind"].forEach(id=>$(id).oninput=render);
+load();setInterval(load,15000);
+</script>
+</body></html>

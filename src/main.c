@@ -10,6 +10,7 @@
 #include "archive.h"
 #include "channel.h"
 #include "cluster.h"
+#include "content.h"
 #include "input.h"
 #include "out.h"
 #include "plans.h"
@@ -84,6 +85,9 @@ static void usage(FILE *f) {
 		"      --blocks         one record per ACARS block, without joining multi-block messages\n"
 		"                       (meta.more is true on blocks that end with ETB)\n"
 		"      --bulletins      also emit STD-C bulletin boards (one per 8.64 s frame)\n"
+		"      --stdc-content DIR  decode STD-C messages to ships for a local-only page (127.0.0.1, see\n"
+		"                       --content-port), kept 24 h in DIR; never archived, fed or on the shared pages\n"
+		"      --content-port PORT  its port (default 8894)\n"
 		"      --mobile-key FILE  secret key for hashing ships' mobile numbers in STD-C metadata (default\n"
 		"                       ~/.config/inmarsat-rx/mobile.key, made on first use; keep it out of shared archives)\n"
 		"      --station NAME   this receiver's name, in the records and on the live page\n"
@@ -279,7 +283,8 @@ static long trial_frames(int kind) { return kind == CH_STDC ? 2 : 3; }
 
 int main(int argc, char **argv) {
 	const char *input = "-", *udp = NULL, *station = NULL, *gain = NULL, *plan = NULL, *sat_default = NULL;
-	const char *archive_dir = NULL, *mobile_key_path = NULL;
+	const char *archive_dir = NULL, *mobile_key_path = NULL, *content_dir = NULL;
+	int content_port = 8894;
 	int bias = 0, amp = 0, scan = 0, web_port = 0, obs_port = 8893; double ppm = 0, scan_period = 30;
 	int format = -1, quiet = 0, threads = 0, block = 0;
 	double rate = 0, center = 0, stats_every = 30, start_arg = 0;
@@ -287,7 +292,7 @@ int main(int argc, char **argv) {
 	spec_t specs[MAX_CHANNELS]; int nspecs = 0;
 	enum { OPT_HIDE_ACKS = 256, OPT_START, OPT_BLOCKS, OPT_DATA, OPT_BULLETINS, OPT_STATION, OPT_STATS, OPT_BLOCK, OPT_AMP,
 		OPT_PLAN, OPT_PLANS, OPT_SAT, OPT_SCAN, OPT_SCAN_PERIOD, OPT_ARCHIVE, OPT_WEB, OPT_OBS_PORT, OPT_NO_CLUSTERS,
-		OPT_MOBILE_KEY };
+		OPT_MOBILE_KEY, OPT_CONTENT, OPT_CONTENT_PORT };
 	static const struct option longopts[] = {
 		{"input", required_argument, 0, 'i'}, {"format", required_argument, 0, 'f'},
 		{"rate", required_argument, 0, 's'}, {"center", required_argument, 0, 'F'},
@@ -302,7 +307,8 @@ int main(int argc, char **argv) {
 		{"scan", no_argument, 0, OPT_SCAN}, {"scan-period", required_argument, 0, OPT_SCAN_PERIOD},
 		{"archive", required_argument, 0, OPT_ARCHIVE}, {"web", required_argument, 0, OPT_WEB},
 		{"observatory-port", required_argument, 0, OPT_OBS_PORT}, {"no-clusters", no_argument, 0, OPT_NO_CLUSTERS},
-		{"mobile-key", required_argument, 0, OPT_MOBILE_KEY}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
+		{"mobile-key", required_argument, 0, OPT_MOBILE_KEY}, {"stdc-content", required_argument, 0, OPT_CONTENT},
+		{"content-port", required_argument, 0, OPT_CONTENT_PORT}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
 	int c;
 	while ((c = getopt_long(argc, argv, "i:f:s:F:c:u:qt:g:bp:h", longopts, NULL)) != -1) {
 		switch (c) {
@@ -355,6 +361,8 @@ int main(int argc, char **argv) {
 		case OPT_OBS_PORT: obs_port = atoi(optarg); break;
 		case OPT_NO_CLUSTERS: clusters_off = 1; break;
 		case OPT_MOBILE_KEY: mobile_key_path = optarg; break;
+		case OPT_CONTENT: content_dir = optarg; break;
+		case OPT_CONTENT_PORT: content_port = atoi(optarg); break;
 		case 'h': usage(stdout); return 0;
 		default: usage(stderr); return 2;
 		}
@@ -413,6 +421,7 @@ int main(int argc, char **argv) {
 	if (!block) block = (int)fmin(65536, fmax(1024, in->rate / 20));
 	if (out_init(!quiet, udp)) return 1;
 	load_mobile_key(mobile_key_path);
+	if (content_dir) { if (content_start(content_dir, content_port)) return 1; opts.content = 1; }
 	if (archive_dir && archive_open(archive_dir)) return 1;
 	if (web_port && web_start(web_port, station, obs_port)) return 1;
 	web_receiver(in->name, in->center_hz, in->rate, gain, bias);
@@ -565,6 +574,7 @@ int main(int argc, char **argv) {
 		for (int g = 0; g < nignore;) if (seconds >= ignore[g].until) ignore[g] = ignore[--nignore]; else g++;
 		if (scanner) clusters_gc(slots, nslots);
 
+		if (content_enabled() && seconds >= next_web) content_tick(now_ms);
 		if (web_enabled() && seconds >= next_web) {
 			channel_info_t infos[MAX_CHANNELS]; int ni = 0;
 			for (int i = 0; i < nslots; i++) if (!slots[i].trial) channel_info(slots[i].ch, &infos[ni++]);
@@ -581,6 +591,7 @@ int main(int argc, char **argv) {
 	if (archive_enabled()) health_event(minute * 60000.0, slots, nslots);
 	print_status(slots, nslots, consumed / in->rate);
 	web_stop();
+	content_stop();
 	for (int i = 0; i < nslots; i++) channel_free(slots[i].ch);
 	for (int i = 0; i < nclusters; i++) cluster_free(&clusters[i]);
 	scan_free(scanner);

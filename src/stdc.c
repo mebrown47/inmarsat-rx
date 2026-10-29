@@ -79,6 +79,7 @@ struct stdc {
 	stdc_egc_cb on_egc; stdc_bulletin_cb on_bulletin; void *user;
 	stdc_frame_cb on_frame; unsigned frame_counts[256], frame_bytes[256];
 	stdc_sig_t sigs[STDC_MAX_SIGS]; int nsigs;
+	int content; stdc_msgpkt_t msgs[STDC_MAX_MSGPKTS]; int nmsgs;
 	float ring[FRAME_SYMBOLS]; int head, filled, since_frame;
 	stdc_stats_t stats;
 	egc_t *egc; int negc, egccap;
@@ -107,6 +108,7 @@ static int packet_length(const uint8_t *frame, int pos, int size) {
 }
 
 void stdc_set_frame_cb(stdc_t *s, stdc_frame_cb cb) { s->on_frame = cb; }
+void stdc_set_content(stdc_t *s, int on) { s->content = on; }
 
 stdc_t *stdc_new(stdc_egc_cb on_egc, stdc_bulletin_cb on_bulletin, void *user) {
 	stdc_t *s = calloc(1, sizeof *s);
@@ -221,6 +223,13 @@ static void signalling(stdc_t *s, const uint8_t *f, int len) {
 	if (les_at >= 0) { g.sat = f[les_at] >> 6; g.les = f[les_at] & 0x3f; }
 	if (lc_at >= 0) g.lc = f[lc_at];
 	if (s->nsigs < STDC_MAX_SIGS) s->sigs[s->nsigs++] = g;
+	// Message payload: bytes after the 5-byte header, before the 2-byte checksum. Only with content on.
+	if (d == 0xaa && s->content && g.payload > 0 && s->nmsgs < STDC_MAX_MSGPKTS) {
+		stdc_msgpkt_t *m = &s->msgs[s->nmsgs++];
+		m->les = g.les; m->lc = g.lc; m->pkt_no = g.pkt_no;
+		m->len = g.payload > (int)sizeof m->data ? (int)sizeof m->data : g.payload;
+		memcpy(m->data, f + 5, m->len);
+	}
 }
 
 static void packet(stdc_t *s, const uint8_t *f, int len) {
@@ -308,9 +317,10 @@ static void process_frame(stdc_t *s, int inverted) {
 	}
 	s->stats.frames++;
 	memset(s->frame_counts, 0, sizeof s->frame_counts); memset(s->frame_bytes, 0, sizeof s->frame_bytes);
-	s->nsigs = 0;
+	s->nsigs = 0; s->nmsgs = 0;
 	parse(s, frame, FRAME_BYTES);
-	if (s->on_frame) s->on_frame(s->frame_counts, s->frame_bytes, s->sigs, s->nsigs, s->user);
+	if (s->on_frame) s->on_frame(s->frame_counts, s->frame_bytes, s->sigs, s->nsigs, s->msgs, s->nmsgs, s->user);
+	if (s->nmsgs) memset(s->msgs, 0, sizeof s->msgs);  // Leave no copies behind.
 	expire(s, 0);
 }
 

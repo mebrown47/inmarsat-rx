@@ -44,11 +44,17 @@ typedef struct {
 } stdc_sig_t;
 #define STDC_MAX_SIGS 64
 
+// A message packet's payload, copied out only when content decoding is on (stdc_set_content).
+typedef struct { int les, lc, pkt_no, len; unsigned char data[256]; } stdc_msgpkt_t;
+#define STDC_MAX_MSGPKTS 32
+
 // Packet tally and signalling per frame: after each decoded frame, the number of packets with a
 // good checksum and their bytes by descriptor byte (multiframe contents counted too), and the
 // signalling metadata. Metadata only.
 typedef void (*stdc_frame_cb)(const unsigned *counts, const unsigned *bytes, const stdc_sig_t *sigs, int nsigs,
-	void *user);
+	const stdc_msgpkt_t *msgs, int nmsgs, void *user);
+// Off by default: message packets' payloads are not copied anywhere.
+void stdc_set_content(stdc_t *s, int on);
 void stdc_set_frame_cb(stdc_t *s, stdc_frame_cb cb);
 
 #endif

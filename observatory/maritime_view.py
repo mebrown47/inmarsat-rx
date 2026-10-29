@@ -22,10 +22,19 @@ def ship_traffic(q, t0, sc, sa):
     """STD-C signalling metadata in the window: activity per LES, logins and other counts, ships
     (as the receiver's keyed hashes), recent events, message deliveries reconstructed per LES channel
     (assignment, message packets, clear), and two checks of the packet layouts."""
-    rows = q(f"SELECT t,sat,freq,chan_les,desc,ship,les,lc,pres,pkt,bytes FROM stdc_sig WHERE t>=?{sc} ORDER BY t", t0, *sa)
+    raw = q(f"SELECT t,sat,freq,chan_les,desc,ship,les,lc,pres,pkt,bytes FROM stdc_sig WHERE t>=?{sc} ORDER BY t", t0, *sa)
+    # LESs repeat signalling in later frames (9-90 s apart): the same packet again within 5 minutes
+    # is a repeat, not a new event.
+    rows, last = [], {}
+    for r in raw:
+        k = (r[1], r[4], r[5], r[6], r[7], r[9])
+        if k in last and r[0] - last[k] <= 300:
+            continue
+        last[k] = r[0]
+        rows.append(r)
     per_les, counts, ships = {}, {}, {}
     sessions, open_ = [], {}
-    names = {"81": "announced", "83": "assigned", "aa": "message packet", "27": "channel cleared",
+    names = {"81": "message announced", "83": "uplink channel assigned", "aa": "message packet", "27": "channel cleared",
              "2a": "inbound message acked", "a3": "polled", "a8": "confirmation", "08": "ack requested"}
     for t, s, f, cles, d, ship, les, lc, pres, pkt, nbytes in rows:
         counts.setdefault(s, {}).setdefault(d, 0)
@@ -45,13 +54,16 @@ def ship_traffic(q, t0, sc, sa):
             sh["kinds"][d] = sh["kinds"].get(d, 0) + 1
             if les is not None:
                 sh["les"].add(f"{s}:{les}")
-        # Deliveries, per LES channel and logical channel.
-        k = (s, f, lc)
-        if d == "83" and lc is not None:
+        # Deliveries to ships: announced on the NCS (satellite, LES, logical channel), message packets
+        # on that LES's channel, then the channel cleared.
+        k = (s, les, lc)
+        if d == "81" and lc is not None:
             if k in open_:
                 sessions.append(open_.pop(k))
             open_[k] = {"t": t, "sat": s, "les": les, "ship": ship, "packets": 0, "bytes": 0, "closed": False}
-        elif d == "aa" and k in open_:
+        elif d == "aa":
+            if k not in open_:  # Announcement missed: a delivery to an unknown ship.
+                open_[k] = {"t": t, "sat": s, "les": les, "ship": None, "packets": 0, "bytes": 0, "closed": False}
             open_[k]["packets"] += 1; open_[k]["bytes"] += nbytes or 0
         elif d == "27" and k in open_:
             o = open_.pop(k); o["closed"] = True; sessions.append(o)
@@ -59,16 +71,16 @@ def ship_traffic(q, t0, sc, sa):
     for o in sessions:
         if o["les"] is not None and (o["sat"], o["les"]) in per_les:
             per_les[(o["sat"], o["les"])]["deliveries"] += 1
-    # Checks: an assignment's LES field should be the LES whose channel carries it; a ship announced
-    # on the NCS should be assigned a channel at that LES soon after.
+    # Checks: an assignment's LES field should be the LES whose channel carries it; a message
+    # announced on the NCS should arrive as packets on that LES's logical channel soon after.
     a83 = [r for r in rows if r[4] == "83" and r[3] is not None]
     les_ok = sum(1 for r in a83 if r[6] == r[3])
-    ann = [r for r in rows if r[4] == "81" and r[5]]
-    assigned = {}
+    ann = [r for r in rows if r[4] == "81"]
+    pk = {}
     for r in rows:
-        if r[4] == "83" and r[5]:
-            assigned.setdefault(r[5], []).append(r[0])
-    followed = sum(1 for r in ann if any(0 <= t - r[0] <= 900 for t in assigned.get(r[5], [])))
+        if r[4] == "aa":
+            pk.setdefault((r[1], r[6], r[7]), []).append(r[0])
+    followed = sum(1 for r in ann if any(0 <= t - r[0] <= 900 for t in pk.get((r[1], r[6], r[7]), [])))
     with_data = [o for o in sessions if o["packets"]]
     return {
         "per_les": sorted(({**p, "ships": len(p["ships"])} for p in per_les.values()), key=lambda p: (p["sat"], p["les"])),
@@ -80,7 +92,7 @@ def ship_traffic(q, t0, sc, sa):
                    if d in names],
         "deliveries": {"count": len(sessions), "with_data": len(with_data), "closed": sum(o["closed"] for o in sessions),
                        "packets": sum(o["packets"] for o in sessions), "bytes": sum(o["bytes"] for o in sessions)},
-        "checks": {"assign_les_match": [les_ok, len(a83)], "announce_then_assign": [followed, len(ann)]},
+        "checks": {"assign_les_match": [les_ok, len(a83)], "announce_then_packets": [followed, len(ann)]},
     }
 
 
@@ -157,7 +169,7 @@ BODY = """
   <div class="panel">
     <h2>Ship traffic <span class="hint">STD-C signalling metadata. Ships appear only as this receiver's keyed hash of their mobile number; no message contents are kept</span></h2>
     <div class="cards" id="shipcards" style="margin:4px 0 10px"></div>
-    <h3>By land earth station <span class="hint">messages to ships go: announced on the NCS → channel assigned at the LES → message packets → channel cleared</span></h3>
+    <h3>By land earth station <span class="hint">to ships: announced on the NCS → message packets on the LES channel → channel cleared · from ships: uplink channel assigned → inbound message acknowledged</span></h3>
     <div id="perles"></div>
     <div class="grid" style="margin-top:12px">
       <div><h3>Recent activity</h3><div class="scroll" id="shiprecent"></div></div>
@@ -206,7 +218,7 @@ function render(D){
       card("Message data",(dl.bytes/1000).toFixed(1)+" kB",fmt(dl.packets)+" packets"),card("Logins",fmt(sum("92")),"acknowledged"),
       card("Data reports",fmt(sum("9a")),"acknowledged"),card("Polls",fmt(sum("a3"))),card("Distress tests",fmt(sum("a0")),fmt(sum("91"))+" alert acks")].join("");
     const P=S.per_les;
-    $("perles").innerHTML=P.length?'<table><tr><th>Satellite</th><th>LES</th><th class="r">Ships</th><th class="r">Announced</th><th class="r">Assigned</th><th class="r">Deliveries</th><th class="r">Msg packets</th><th class="r">Bytes</th><th class="r">Cleared</th><th class="r">Inbound acks</th><th class="r">Polls</th><th class="r">Confirmations</th></tr>'+
+    $("perles").innerHTML=P.length?'<table><tr><th>Satellite</th><th>LES</th><th class="r">Ships</th><th class="r">Announced</th><th class="r">Uplink assigned</th><th class="r">Deliveries</th><th class="r">Msg packets</th><th class="r">Bytes</th><th class="r">Cleared</th><th class="r">Inbound acks</th><th class="r">Polls</th><th class="r">Confirmations</th></tr>'+
       P.map(p=>'<tr><td>'+esc(satName(p.sat))+'</td><td class="mono">'+p.les+'</td><td class="r">'+p.ships+'</td><td class="r n">'+(p["81"]||"")+'</td><td class="r n">'+(p["83"]||"")+
         '</td><td class="r">'+(p.deliveries||"")+'</td><td class="r n">'+(p.aa||"")+'</td><td class="r n">'+(p.bytes||"")+'</td><td class="r n">'+(p["27"]||"")+'</td><td class="r n">'+(p["2a"]||"")+
         '</td><td class="r n">'+(p.a3||"")+'</td><td class="r n">'+(p.a8||"")+'</td></tr>').join("")+'</table>':'<div class="empty">no signalling in this window</div>';
@@ -218,7 +230,7 @@ function render(D){
         '</td><td class="r n">'+dt(v.last).slice(6)+'</td></tr>').join("")+'</table>':'<div class="empty">none</div>';
     const c=S.checks,pc=([a,b])=>b?(100*a/b).toFixed(0)+"% ("+a+"/"+b+")":"–";
     $("shipchecks").innerHTML="Layout checks: assignment LES field matches the channel's own LES "+pc(c.assign_les_match)+
-      " · ships announced on the NCS then assigned at an LES within 15 min "+pc(c.announce_then_assign);
+      " · messages announced on the NCS that arrive as packets on that LES channel within 15 min "+pc(c.announce_then_packets);
   }
   // Columns for the types that say most about traffic; the rest are summed as "other".
   const COLS=["81","83","aa","a3","a8","08","27","2a","6c","7d","b1"],DN=D.descriptors||{};
