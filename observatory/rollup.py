@@ -26,6 +26,7 @@ Usage:
 """
 
 import argparse
+import fcntl
 import glob
 import json
 import os
@@ -368,6 +369,10 @@ def main():
         print(f"rollup: no archive files in {args.archive}", file=sys.stderr)
         return 1
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
+    # One rollup at a time: two reading from the same offsets would both add the same lines
+    # (the timer and a run by hand, say). The second waits for the first.
+    lock = open(args.db + ".lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)
     con = sqlite3.connect(args.db)
     init_db(con)
     agg = Agg()
