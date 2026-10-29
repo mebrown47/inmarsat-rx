@@ -9,13 +9,21 @@
 // repeated in later frames; a repeat of the open delivery's announcement is ignored. Its text is decoded as IA5; content
 // that is not clearly text is shown as binary, by size only. Finished deliveries go to an hourly file
 // (mode 600, in a directory of mode 700) and stay 24 hours.
+//
+// Binary content is described, never shown: how random its bytes look, and keyed hashes of the whole
+// payload and of its first two bytes, so the page can count identical payloads and group those that
+// open alike without revealing a byte. A ship's own sending (its channel assignment, 0x83, and the
+// LES's ack of its message, 0x2A) is kept by ship hash too, in hourly uplinks files, so each delivery
+// can show whether the ship sent something soon after.
 #define _GNU_SOURCE
 #include "content.h"
 #include "out.h"
+#include "sha256.h"
 #include <arpa/inet.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -34,6 +42,9 @@
 #define MAX_PKTS 256
 #define MAX_RECS 20000
 #define TEXT_SHARE 0.95   // At least this share of printable IA5 characters to show as text.
+#define MAX_UPS 20000
+#define UP_REPEAT_MS (5 * 60 * 1000.0)  // The LES repeats signalling for a few minutes: one is enough.
+#define REPLY_MS (15 * 60 * 1000.0)     // How long after a delivery a ship's sending counts as its answer.
 
 typedef struct { int no, len; uint8_t data[256]; } pkt_t;
 typedef struct {
@@ -43,7 +54,10 @@ typedef struct {
 typedef struct {
 	double t, freq; char sat[24], ship[12]; int les, lc, pres, packets, missing, bytes, binary;
 	char *text;
+	double rnd;                // Binary: entropy as a share of what random bytes of that length give; -1 unknown.
+	char dig[12], lead[8];     // Binary: keyed hashes of the payload and of its first two bytes.
 } rec_t;
+typedef struct { double t; char ship[12]; int desc, les; } up_t;  // A ship sending: 0x83 or 0x2A.
 
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static int enabled, listen_fd = -1, running;
@@ -51,9 +65,16 @@ static pthread_t thread;
 static char dir[512];
 static open_t opened[MAX_OPEN]; static int nopen;
 static rec_t recs[MAX_RECS]; static int nrecs;
+static up_t ups[MAX_UPS]; static int nups;
+static unsigned char key[64]; static int key_len;
 static double latest;
 
 int content_enabled(void) { return enabled; }
+
+void content_set_key(const unsigned char *k, int len) {
+	key_len = len > 64 ? 64 : len;
+	memcpy(key, k, key_len);
+}
 
 static void rec_free(rec_t *r) { free(r->text); r->text = NULL; }
 
@@ -87,7 +108,46 @@ static char *ia5(const uint8_t *b, int n) {
 	return t;
 }
 
+// Shannon entropy of the bytes, in bits per byte.
+static double entropy(const uint8_t *b, int n) {
+	int cnt[256] = {0};
+	for (int i = 0; i < n; i++) cnt[b[i]]++;
+	double h = 0;
+	for (int i = 0; i < 256; i++) if (cnt[i]) { double p = (double)cnt[i] / n; h -= p * log2(p); }
+	return h;
+}
+
+// What random bytes of length n give on average (short payloads cannot reach 8 bits: 64 bytes give
+// about 5.7). A fixed-seed average over a few dozen draws.
+static double entropy_random(int n) {
+	static int last_n; static double last_h;
+	if (n == last_n) return last_h;
+	uint8_t *b = malloc(n); uint32_t x = 2463534242u; double sum = 0;
+	for (int k = 0; k < 32; k++) {
+		for (int i = 0; i < n; i++) { x ^= x << 13; x ^= x >> 17; x ^= x << 5; b[i] = (uint8_t)x; }
+		sum += entropy(b, n);
+	}
+	free(b);
+	last_n = n; last_h = sum / 32;
+	return last_h;
+}
+
+// A keyed hash of some bytes, short and in hex. The domain keeps it apart from the ship hashes.
+static void keyed_hex(const char *domain, const uint8_t *b, int n, char *out, int hex) {
+	size_t dl = strlen(domain);
+	uint8_t *m = malloc(dl + n + 1), h[32];
+	memcpy(m, domain, dl); memcpy(m + dl, b, n);
+	hmac_sha256(key, key_len, m, dl + n, h);
+	memset(m, 0, dl + n); free(m);
+	for (int i = 0; i < hex / 2; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
+}
+
 static int cmp_pkt(const void *a, const void *b) { return ((const pkt_t *)a)->no - ((const pkt_t *)b)->no; }
+
+static void rec_features(jbuf_t *b, const rec_t *r) {
+	if (r->rnd >= 0) jb_printf(b, ",\"rnd\":%.3f", r->rnd);
+	if (r->dig[0]) { jb_key(b, "dig"); jb_str(b, r->dig); jb_key(b, "lead"); jb_str(b, r->lead); }
+}
 
 static void file_append(const rec_t *r) {
 	time_t tt = (time_t)(r->t / 1000); struct tm g; gmtime_r(&tt, &g);
@@ -100,9 +160,26 @@ static void file_append(const rec_t *r) {
 	jb_key(&b, "ship"); jb_str(&b, r->ship[0] ? r->ship : NULL);
 	jb_printf(&b, ",\"les\":%d,\"lc\":%d,\"pres\":%d,\"packets\":%d,\"missing\":%d,\"bytes\":%d,\"binary\":%d", r->les, r->lc,
 		r->pres, r->packets, r->missing, r->bytes, r->binary);
-	jb_key(&b, "text"); jb_str(&b, r->text); jb_raw(&b, "}\n");
+	jb_key(&b, "text"); jb_str(&b, r->text); rec_features(&b, r); jb_raw(&b, "}\n");
 	if (write(fd, b.s, b.len) < 0) fprintf(stderr, "content: write failed: %s\n", strerror(errno));
 	close(fd); jb_free(&b);
+}
+
+static void up_append(const up_t *u) {
+	time_t tt = (time_t)(u->t / 1000); struct tm g; gmtime_r(&tt, &g);
+	char path[700];
+	snprintf(path, sizeof path, "%s/uplinks-%04d%02d%02d%02d.jsonl", dir, g.tm_year + 1900, g.tm_mon + 1, g.tm_mday, g.tm_hour);
+	int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+	if (fd < 0) { fprintf(stderr, "content: cannot write %s: %s\n", path, strerror(errno)); return; }
+	char line[128];
+	int n = snprintf(line, sizeof line, "{\"t\":%.0f,\"ship\":\"%s\",\"desc\":%d,\"les\":%d}\n", u->t, u->ship, u->desc, u->les);
+	if (write(fd, line, n) < 0) fprintf(stderr, "content: write failed: %s\n", strerror(errno));
+	close(fd);
+}
+
+static void add_up(const up_t *u) {
+	if (nups == MAX_UPS) { memmove(ups, ups + 1, (MAX_UPS - 1) * sizeof *ups); nups--; }
+	ups[nups++] = *u;
 }
 
 static void add_rec(rec_t *r) {
@@ -144,7 +221,11 @@ static void finish(open_t *o) {
 			for (size_t e = text ? strlen(text) : 0; e && (text[e - 1] == '\n' || text[e - 1] == ' '); e--) text[e - 1] = 0;
 		} else binary = 1;
 		rec_t r = {.t = o->t_open, .freq = o->freq, .les = o->les, .lc = o->lc, .pres = o->pres, .packets = uniq,
-			.missing = missing, .bytes = n, .binary = binary, .text = text};
+			.missing = missing, .bytes = n, .binary = binary, .text = text, .rnd = -1};
+		if (binary && n) {
+			r.rnd = entropy(all, n) / entropy_random(n);
+			if (key_len) { keyed_hex("payload:", all, n, r.dig, 10); keyed_hex("lead:", all, n < 2 ? n : 2, r.lead, 6); }
+		}
 		snprintf(r.sat, sizeof r.sat, "%s", o->sat); snprintf(r.ship, sizeof r.ship, "%s", o->ship);
 		file_append(&r);
 		add_rec(&r);
@@ -182,6 +263,16 @@ void content_signal(double t_ms, double freq, const char *sat, int desc, const c
 	} else if (desc == 0x27 && lc >= 0) {
 		open_t *o = find_open(sat, les, lc);
 		if (o && o->npkts) finish(o);  // A clear before any packet is a repeat of an earlier one.
+	} else if ((desc == 0x83 || desc == 0x2a) && ship) {
+		int rep = 0;
+		for (int i = nups - 1; i >= 0 && t_ms - ups[i].t < UP_REPEAT_MS; i--)
+			if (ups[i].desc == desc && !strcmp(ups[i].ship, ship)) { rep = 1; break; }
+		if (!rep) {
+			up_t u = {.t = t_ms, .desc = desc, .les = les};
+			snprintf(u.ship, sizeof u.ship, "%s", ship);
+			up_append(&u);
+			add_up(&u);
+		}
 	}
 	pthread_mutex_unlock(&lock);
 }
@@ -208,7 +299,8 @@ static void prune_files(double now_ms) {
 	struct dirent *e;
 	while ((e = readdir(d))) {
 		int y, m, dd, h;
-		if (sscanf(e->d_name, "deliveries-%4d%2d%2d%2d.jsonl", &y, &m, &dd, &h) != 4) continue;
+		if (sscanf(e->d_name, "deliveries-%4d%2d%2d%2d.jsonl", &y, &m, &dd, &h) != 4 &&
+			sscanf(e->d_name, "uplinks-%4d%2d%2d%2d.jsonl", &y, &m, &dd, &h) != 4) continue;
 		struct tm g = {.tm_year = y - 1900, .tm_mon = m - 1, .tm_mday = dd, .tm_hour = h};
 		double end_ms = ((double)timegm(&g) + 3600) * 1000;
 		if (now_ms - end_ms > KEEP_MS) {
@@ -227,6 +319,8 @@ void content_tick(double t_ms) {
 	int k = 0;
 	while (k < nrecs && t_ms - recs[k].t > KEEP_MS) rec_free(&recs[k++]);
 	if (k) { memmove(recs, recs + k, (nrecs - k) * sizeof *recs); nrecs -= k; }
+	for (k = 0; k < nups && t_ms - ups[k].t > KEEP_MS; k++) ;
+	if (k) { memmove(ups, ups + k, (nups - k) * sizeof *ups); nups -= k; }
 	static double last_prune;
 	if (t_ms - last_prune > 600000) { prune_files(t_ms); last_prune = t_ms; }
 	pthread_mutex_unlock(&lock);
@@ -261,6 +355,7 @@ static int json_str(const char *line, const char *key, char *out, size_t size) {
 }
 
 static int cmp_rec(const void *a, const void *b) { double x = ((const rec_t *)a)->t, y = ((const rec_t *)b)->t; return x < y ? -1 : x > y; }
+static int cmp_up(const void *a, const void *b) { double x = ((const up_t *)a)->t, y = ((const up_t *)b)->t; return x < y ? -1 : x > y; }
 
 static void load(double now_ms) {
 	DIR *d = opendir(dir);
@@ -268,12 +363,21 @@ static void load(double now_ms) {
 	struct dirent *e;
 	char *line = NULL; size_t cap = 0;
 	while ((e = readdir(d))) {
-		if (strncmp(e->d_name, "deliveries-", 11)) continue;
+		int is_up = !strncmp(e->d_name, "uplinks-", 8);
+		if (strncmp(e->d_name, "deliveries-", 11) && !is_up) continue;
 		char path[800]; snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
 		FILE *f = fopen(path, "r");
 		if (!f) continue;
 		while (getline(&line, &cap, f) > 0) {
-			rec_t r = {0}; double v;
+			if (is_up) {
+				up_t u = {0}; double v;
+				if (!json_num(line, "t", &u.t) || now_ms - u.t > KEEP_MS || !json_str(line, "ship", u.ship, sizeof u.ship)) continue;
+				if (json_num(line, "desc", &v)) u.desc = (int)v;
+				if (json_num(line, "les", &v)) u.les = (int)v;
+				if (nups < MAX_UPS) ups[nups++] = u;
+				continue;
+			}
+			rec_t r = {.rnd = -1}; double v;
 			if (!json_num(line, "t", &r.t) || now_ms - r.t > KEEP_MS) continue;
 			if (json_num(line, "freq", &v)) r.freq = v;
 			json_str(line, "sat", r.sat, sizeof r.sat); json_str(line, "ship", r.ship, sizeof r.ship);
@@ -284,6 +388,8 @@ static void load(double now_ms) {
 			if (json_num(line, "missing", &v)) r.missing = (int)v;
 			if (json_num(line, "bytes", &v)) r.bytes = (int)v;
 			if (json_num(line, "binary", &v)) r.binary = (int)v;
+			if (json_num(line, "rnd", &v)) r.rnd = v;
+			json_str(line, "dig", r.dig, sizeof r.dig); json_str(line, "lead", r.lead, sizeof r.lead);
 			char *t = malloc(cap + 1);
 			if (json_str(line, "text", t, cap + 1)) r.text = t; else free(t);
 			// Saved by an older build that judged text by printability alone: apply today's rule.
@@ -302,6 +408,7 @@ static void load(double now_ms) {
 	}
 	free(line); closedir(d);
 	qsort(recs, nrecs, sizeof *recs, cmp_rec);
+	qsort(ups, nups, sizeof *ups, cmp_up);
 }
 
 // ---- The page, on 127.0.0.1 only ----
@@ -311,7 +418,7 @@ extern const char CONTENT_PAGE[];
 static void state_json(jbuf_t *b) {
 	struct timeval tv; gettimeofday(&tv, NULL);
 	pthread_mutex_lock(&lock);
-	jb_printf(b, "{\"now\":%.0f,\"latest\":%.0f,\"open\":%d", tv.tv_sec * 1000.0, latest, nopen);
+	jb_printf(b, "{\"now\":%.0f,\"latest\":%.0f,\"open\":%d,\"reply_ms\":%.0f", tv.tv_sec * 1000.0, latest, nopen, REPLY_MS);
 	jb_key(b, "dir"); jb_str(b, dir);
 	jb_key(b, "deliveries"); jb_raw(b, "[");
 	for (int i = nrecs - 1, first = 1; i >= 0; i--) {
@@ -321,7 +428,21 @@ static void state_json(jbuf_t *b) {
 		jb_key(b, "ship"); jb_str(b, r->ship[0] ? r->ship : NULL);
 		jb_printf(b, ",\"les\":%d,\"lc\":%d,\"pres\":%d,\"packets\":%d,\"missing\":%d,\"bytes\":%d,\"binary\":%d", r->les, r->lc,
 			r->pres, r->packets, r->missing, r->bytes, r->binary);
-		jb_key(b, "text"); jb_str(b, r->text); jb_raw(b, "}");
+		jb_key(b, "text"); jb_str(b, r->text); rec_features(b, r);
+		// The ship's first channel assignment and first acked message after it, if within REPLY_MS.
+		double assign = -1, acked = -1;
+		if (r->ship[0]) {
+			int lo = 0, hi = nups;
+			while (lo < hi) { int mid = (lo + hi) / 2; if (ups[mid].t < r->t) lo = mid + 1; else hi = mid; }
+			for (int k = lo; k < nups && ups[k].t - r->t <= REPLY_MS; k++) {
+				if (strcmp(ups[k].ship, r->ship)) continue;
+				if (ups[k].desc == 0x83 && assign < 0) assign = ups[k].t - r->t;
+				if (ups[k].desc == 0x2a && acked < 0) acked = ups[k].t - r->t;
+			}
+		}
+		if (assign >= 0) jb_printf(b, ",\"assign_ms\":%.0f", assign);
+		if (acked >= 0) jb_printf(b, ",\"acked_ms\":%.0f", acked);
+		jb_raw(b, "}");
 	}
 	jb_raw(b, "]}");
 	pthread_mutex_unlock(&lock);

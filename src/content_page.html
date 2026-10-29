@@ -35,6 +35,8 @@
   .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   .n{color:var(--dim);font-variant-numeric:tabular-nums}
   .warnc{color:var(--warn)}.ok{color:var(--good)}
+  .foot{font-size:11.5px;margin-top:10px;line-height:1.5}
+  .tag{display:inline-block;padding:0 5px;border-radius:4px;background:var(--panel2);border:1px solid var(--line);font-size:11px}
   .empty{color:var(--dim);padding:20px;text-align:center;font-size:13px}
 </style></head>
 <body>
@@ -48,9 +50,11 @@
   <div class="notice" id="notice">Messages addressed to individual ships. This page is served on 127.0.0.1 only: reach it through an SSH tunnel. Deliveries are kept 24 hours and are not archived, fed or shown on the shared pages. Ships appear as this receiver's keyed hash of their mobile number.</div>
   <div class="cards" id="cards"></div>
   <div class="panel">
-    <h2>Deliveries <span class="hint">newest first; [&hellip;] marks packets not received; binary content is shown by size only</span></h2>
-    <div class="tools"><input id="q" placeholder="search text or ship hash" autocomplete="off"><select id="les"></select><select id="kind"><option value="">all</option><option value="text">text</option><option value="binary">binary</option><option value="gaps">with gaps</option></select></div>
+    <h2>Deliveries <span class="hint">newest first; [&hellip;] marks packets not received; binary content is described, never shown</span></h2>
+    <div class="tools"><input id="q" placeholder="search text or ship hash" autocomplete="off"><select id="les"></select><select id="kind"><option value="">all</option><option value="text">text</option><option value="binary">binary</option><option value="gaps">with gaps</option><option value="answered">ship sent soon after</option></select></div>
     <div id="rows"></div>
+    <div class="foot n">Ship sent: the ship asked for a channel to send on (0x83) and the LES acknowledged its message (0x2A), within <span id="win">15</span> minutes of the announcement; times are from the announcement. A ship that reports on its own schedule can show here by chance.
+      Binary: <b>randomness</b> is the bytes' entropy as a share of what random bytes of that length give (encrypted or compressed data is near 100%); <b>opening</b> groups payloads whose first two bytes match, by letter, most common first; <b>same as</b> counts other deliveries with an identical payload. Both come from keyed hashes: no byte is shown or kept.</div>
   </div>
 </main>
 <script>
@@ -59,6 +63,8 @@ let D=null;
 function esc(s){return (s==null?"":""+s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
 function pad(x){return String(x).padStart(2,"0");}
 function dt(ms){const d=new Date(ms);return pad(d.getUTCMonth()+1)+"-"+pad(d.getUTCDate())+" "+pad(d.getUTCHours())+":"+pad(d.getUTCMinutes())+":"+pad(d.getUTCSeconds());}
+function ago(ms){const s=Math.round(ms/1000);return "+"+Math.floor(s/60)+":"+pad(s%60);}
+function answered(m){return m.assign_ms!=null||m.acked_ms!=null;}
 function card(k,v,sub){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+(sub?' <small>'+sub+'</small>':'')+'</div></div>';}
 const SAT={i4f3:"I-4 F3",i3f5:"I-3 F5",alphasat:"Alphasat","?":"Unassigned"};
 // STD-C land earth stations seen on this receiver (kept in step with LES_NAMES in observatory/common.py).
@@ -75,16 +81,29 @@ function render(){
   if(!D)return;
   // Newest first by announcement time (the list arrives in the order deliveries finished).
   const M=D.deliveries.slice().sort((a,b)=>b.t-a.t),text=M.filter(m=>!m.binary),bin=M.filter(m=>m.binary),gap=M.filter(m=>m.missing),known=M.filter(m=>m.ship);
-  $("cards").innerHTML=[card("Deliveries",M.length,"last 24 h"),card("Text",text.length),card("Binary",bin.length,"size only"),
+  $("cards").innerHTML=[card("Deliveries",M.length,"last 24 h"),card("Text",text.length),card("Binary",bin.length,"described only"),
     card("Complete",M.length?Math.round(100*(M.length-gap.length)/M.length)+"%":"–",gap.length+" with gaps"),
     card("Ship known",known.length,"announcement heard"),card("Bytes",(M.reduce((a,m)=>a+m.bytes,0)/1000).toFixed(1)+" kB")].join("");
+  const known64=known.filter(m=>m.binary&&m.bytes===64),knownOther=known.filter(m=>!(m.binary&&m.bytes===64));
+  $("cards").innerHTML+=card("Ship sent soon after",known.filter(answered).length+" <small>of "+known.length+"</small>",
+    "64-byte binary "+known64.filter(answered).length+"/"+known64.length+" · others "+knownOther.filter(answered).length+"/"+knownOther.length);
+  if(D.reply_ms)$("win").textContent=Math.round(D.reply_ms/60000);
+  // Openings: a letter per distinct first-two-bytes hash, most common first. Identical payloads: by payload hash.
+  const leadN={},digN={};M.forEach(m=>{if(m.lead)leadN[m.lead]=(leadN[m.lead]||0)+1;if(m.dig)digN[m.dig]=(digN[m.dig]||0)+1;});
+  const LETTER={};Object.keys(leadN).sort((a,b)=>leadN[b]-leadN[a]||(a<b?-1:1)).forEach((k,i)=>LETTER[k]=i<26?String.fromCharCode(65+i):"#"+(i+1));
+  const describe=m=>{const p=['binary, '+m.bytes+' bytes'];
+    if(m.rnd!=null)p.push('randomness '+Math.min(100,Math.round(100*m.rnd))+'%');
+    if(m.lead)p.push('opening <span class="tag" title="'+leadN[m.lead]+' in 24 h open alike">'+LETTER[m.lead]+'</span>');
+    if(m.dig&&digN[m.dig]>1)p.push('<span class="warnc">same as '+(digN[m.dig]-1)+' other'+(digN[m.dig]>2?'s':'')+'</span>');
+    return '<span class="n">'+p.join(" · ")+'</span>';};
+  const reply=m=>!m.ship?'<span class="n">–</span>':answered(m)?'<span class="ok">'+[m.assign_ms!=null?"channel "+ago(m.assign_ms):"",m.acked_ms!=null?"acked "+ago(m.acked_ms):""].filter(Boolean).join(" · ")+'</span>':'<span class="n">nothing heard</span>';
   const q=$("q").value.trim().toLowerCase(),les=$("les").value,kind=$("kind").value;
-  const R=M.filter(m=>(!les||m.sat+":"+m.les===les)&&(!kind||(kind==="text"&&!m.binary)||(kind==="binary"&&m.binary)||(kind==="gaps"&&m.missing))&&
+  const R=M.filter(m=>(!les||m.sat+":"+m.les===les)&&(!kind||(kind==="text"&&!m.binary)||(kind==="binary"&&m.binary)||(kind==="gaps"&&m.missing)||(kind==="answered"&&answered(m)))&&
     (!q||(m.text||"").toLowerCase().includes(q)||(m.ship||"").includes(q)));
-  $("rows").innerHTML=R.length?'<table><tr><th>UTC</th><th>Satellite</th><th>LES</th><th>Ship (hash)</th><th class="r">Packets</th><th class="r">Bytes</th><th>Message</th></tr>'+
+  $("rows").innerHTML=R.length?'<table><tr><th>UTC</th><th>Satellite</th><th>LES</th><th>Ship (hash)</th><th class="r">Packets</th><th class="r">Bytes</th><th>Ship sent</th><th>Message</th></tr>'+
     R.map(m=>'<tr><td class="mono n">'+dt(m.t)+'</td><td>'+esc(SAT[m.sat]||m.sat)+'</td><td>'+m.les+(LESNAMES[m.sat+":"+m.les]?" "+esc(LESNAMES[m.sat+":"+m.les]):"")+' <span class="n">ch '+m.lc+'</span></td><td class="mono n">'+esc(m.ship||"unknown")+
       '</td><td class="r">'+m.packets+(m.missing?' <span class="warnc">−'+m.missing+'</span>':'')+'</td><td class="r n">'+m.bytes+
-      '</td><td class="body">'+(m.binary?'<span class="n">binary, '+m.bytes+' bytes</span>':esc(m.text))+'</td></tr>').join("")+'</table>'
+      '</td><td>'+reply(m)+'</td><td class="body">'+(m.binary?describe(m):esc(m.text))+'</td></tr>').join("")+'</table>'
     :'<div class="empty">'+(M.length?"no deliveries match":"no deliveries yet — messages to ships are announced a few times an hour per LES")+'</div>';
 }
 ["q","les","kind"].forEach(id=>$(id).oninput=render);
