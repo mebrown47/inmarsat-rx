@@ -117,6 +117,12 @@ def init_db(con):
         CREATE TABLE IF NOT EXISTS chan_events (
             t INTEGER, op TEXT, freq INTEGER, svc TEXT, sat TEXT, why TEXT
         );
+        -- STD-C packet tally per channel and descriptor byte (count, bytes), from the per-minute
+        -- "spkt" event. Metadata only: the archive holds no packet contents.
+        CREATE TABLE IF NOT EXISTS stdc_pkt_hourly (
+            hour INTEGER, sat TEXT, freq INTEGER, desc TEXT, count INTEGER, bytes INTEGER,
+            PRIMARY KEY (hour, sat, freq, desc)
+        );
         -- The NCS each STD-C channel belongs to, from its bulletin board.
         CREATE TABLE IF NOT EXISTS stations (
             sat TEXT, freq INTEGER, les INTEGER, station TEXT, t INTEGER,
@@ -207,6 +213,7 @@ class Agg:
         self.ges = {}       # (hour,ges,sat) -> count
         self.messages, self.cpdlcs, self.adscs, self.egcs, self.events = [], [], [], [], []
         self.stations = {}  # (sat,freq) -> (les, station, t)
+        self.spkt = {}      # (hour,sat,freq,desc) -> [count, bytes]
         self.lines = self.bad = 0
 
     def add(self, d, key, n=1):
@@ -265,6 +272,16 @@ class Agg:
             self.egcs.append((ts, ev.get("sat", "?"), ev.get("freq", 0), ev.get("les"), ev.get("station"),
                               ev.get("svc"), ev.get("service"), ev.get("prio"), ev.get("id"), ev.get("parts"),
                               int(bool(ev.get("complete"))), ev.get("rep"), ev.get("txt") or ""))
+        elif e == "spkt":
+            h = hour_of(ev["t"])
+            for freq, c in ev.get("ch", {}).items():
+                sat = c.get("sat", "?")
+                for desc, (n, b) in c.get("d", {}).items():
+                    a = self.spkt.setdefault((h, sat, int(freq), desc), [0, 0])
+                    a[0] += n
+                    a[1] += b
+                if c.get("les") is not None:
+                    self.stations[(sat, int(freq))] = (c["les"], c.get("station", ""), sec_of(ev["t"]))
         elif e == "chan":
             self.events.append((sec_of(ev["t"]), ev.get("op"), ev.get("f"), ev.get("svc"), ev.get("sat"), ev.get("why")))
         elif e == "start":
@@ -300,6 +317,9 @@ class Agg:
         con.executemany("INSERT INTO egc(t,sat,freq,les,station,svc,service,prio,egc_id,parts,complete,rep,txt) "
                         "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)", self.egcs)
         con.executemany("INSERT INTO chan_events VALUES(?,?,?,?,?,?)", self.events)
+        con.executemany("INSERT INTO stdc_pkt_hourly VALUES(?,?,?,?,?,?) ON CONFLICT(hour,sat,freq,desc) DO UPDATE "
+                        "SET count=count+excluded.count, bytes=bytes+excluded.bytes",
+                        [(*k, *v) for k, v in self.spkt.items()])
         con.executemany("INSERT INTO stations VALUES(?,?,?,?,?) ON CONFLICT(sat,freq) DO UPDATE SET "
                         "les=excluded.les, station=excluded.station, t=excluded.t WHERE excluded.t>=stations.t",
                         [(*k, *v) for k, v in self.stations.items()])

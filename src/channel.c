@@ -31,6 +31,7 @@ struct channel {
 	long egc_count;
 	long last_frames; double progress_ms;   // Aero: frames at the last change, and when (sample time).
 	int fails; double rest_until;            // Aero: listening windows without a frame; resting until.
+	unsigned long tally_n[256], tally_b[256]; double tally_frame_ms;  // STD-C packet tally (metadata).
 	// Satellite votes for a channel found by --scan (sat "?"): aircraft also heard on a known one.
 	struct { char sat[24]; int n; } votes[4]; int nvotes, total_votes; char last_voter[8];
 };
@@ -245,6 +246,23 @@ static void on_egc(const stdc_egc_t *e, void *user) {
 	jb_free(&b);
 }
 
+// Both STD-C detectors may decode the same 8.64 s frame: count a frame once, from whichever
+// finishes it first, and ignore a second report within a few seconds.
+static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, void *user) {
+	channel_t *c = user;
+	if (c->tally_frame_ms && c->now - c->tally_frame_ms < 4000) return;
+	c->tally_frame_ms = c->now;
+	for (int d = 0; d < 256; d++) { c->tally_n[d] += counts[d]; c->tally_b[d] += bytes[d]; }
+}
+
+int channel_take_tally(channel_t *c, unsigned long counts[256], unsigned long bytes[256]) {
+	if (c->kind != CH_STDC) return 0;
+	int any = 0;
+	for (int d = 0; d < 256; d++) { counts[d] = c->tally_n[d]; bytes[d] = c->tally_b[d]; any |= counts[d] != 0; }
+	memset(c->tally_n, 0, sizeof c->tally_n); memset(c->tally_b, 0, sizeof c->tally_b);
+	return any;
+}
+
 static void on_bulletin(const stdc_bulletin_t *e, void *user) {
 	channel_t *c = user;
 	c->have_station = 1; c->les = e->les;
@@ -272,6 +290,7 @@ channel_t *channel_new(channel_kind_t kind, double freq_hz, const char *sat, int
 		c->psk = psk_new(PSK_BPSK, 1200, rate, offset, 1);
 		c->stdc_diff = stdc_new(on_egc, on_bulletin, c);
 		c->stdc_coh = stdc_new(on_egc, on_bulletin, c);
+		stdc_set_frame_cb(c->stdc_diff, on_stdc_frame); stdc_set_frame_cb(c->stdc_coh, on_stdc_frame);
 		break;
 	case CH_AERO_H:
 		// Aero frame sync judges lock itself, so the demodulator keeps tracking instead of re-searching.

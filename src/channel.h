@@ -32,5 +32,8 @@ void channel_status(const channel_t *c, char *buf, int size);
 void channel_info(const channel_t *c, channel_info_t *info);
 double channel_freq(const channel_t *c);
 channel_kind_t channel_kind(const channel_t *c);
+// STD-C: the packet tally (count and bytes by descriptor byte) since the last call, then zeroed.
+// Returns 0 for other channels or when there is nothing to report. Call between blocks.
+int channel_take_tally(channel_t *c, unsigned long counts[256], unsigned long bytes[256]);
 
 #endif

@@ -5,6 +5,18 @@ warnings, distress relays, FleetNET) and the NCS each satellite's STD-C channel 
 
 from common import connect_ro, db_ready, page, sat_clause, satellites_meta, window
 
+# STD-C packet descriptors as public descriptions of the system name them. Tentative until checked
+# against this receiver's own traffic; the page always shows the byte as well.
+DESCRIPTORS = {
+    "08": "acknowledgement request", "27": "logical channel clear", "2a": "inbound message ack",
+    "6c": "signalling channel", "7d": "bulletin board", "81": "announcement",
+    "83": "logical channel assignment", "91": "distress alert ack", "92": "login ack",
+    "9a": "enhanced data report ack", "a0": "distress test request", "a3": "individual poll",
+    "a8": "confirmation", "aa": "message", "ab": "LES list", "ac": "request status",
+    "ad": "test result", "b1": "EGC (first part)", "b2": "EGC (second part)",
+    "bd": "multiframe start", "be": "multiframe continuation",
+}
+
 
 def build_maritime(path, hours=None, sat=None, prio=None):
     err = db_ready(path)
@@ -35,9 +47,20 @@ def build_maritime(path, hours=None, sat=None, prio=None):
                  for s, f, fr, ok, bad, sy, m in q(
             f"SELECT sat,freq,SUM(frames),SUM(ok),SUM(bad),SUM(sync_minutes),SUM(minutes) FROM chan_hourly "
             f"WHERE svc='stdc' AND hour>=?{sc} GROUP BY sat,freq", floor, *sa)]
+        tally, totals = {}, {}
+        have = {r[0] for r in q("SELECT name FROM sqlite_master WHERE type='table'")}
+        if "stdc_pkt_hourly" in have:
+            for s_, f, d, n, b in q(f"SELECT sat,freq,desc,SUM(count),SUM(bytes) FROM stdc_pkt_hourly WHERE hour>=?{sc} "
+                                    f"GROUP BY sat,freq,desc", floor, *sa):
+                t = tally.setdefault((s_, f), {"sat": s_, "freq": f, "packets": 0, "bytes": 0, "d": {}})
+                t["d"][d] = [n, b]; t["packets"] += n; t["bytes"] += b
+                tt = totals.setdefault(d, [0, 0]); tt[0] += n; tt[1] += b
         return {"satellites": satellites_meta(), "sats_present": present, "floor": floor, "hmax": hmax,
                 "by_prio": by_prio, "by_service": by_service, "hourly": [hourly[h] for h in sorted(hourly)],
                 "rows": rows, "stations": stations, "channels": chans,
+                "tally": sorted(tally.values(), key=lambda t: (t["sat"], t["freq"])),
+                "tally_totals": sorted(([d, n, b] for d, (n, b) in totals.items()), key=lambda r: -r[1]),
+                "descriptors": DESCRIPTORS,
                 "last_data": q("SELECT MAX(t) FROM egc")[0][0]}
     finally:
         con.close()
@@ -64,6 +87,14 @@ BODY = """
     <h2>Services <span class="hint">in window</span></h2>
     <div id="services"></div>
   </div>
+  <div class="panel">
+    <h2>STD-C traffic by channel <span class="hint">packets with a good checksum by type, in window. Metadata only: no message contents are kept. Type names are tentative until checked against this traffic</span></h2>
+    <div class="scroll" id="tally" style="max-height:none"></div>
+  </div>
+  <div class="panel">
+    <h2>Packet types <span class="hint">all STD-C channels in window: count, total bytes, mean size</span></h2>
+    <div id="types"></div>
+  </div>
 """
 
 SCRIPT = r"""
@@ -89,6 +120,19 @@ function render(D){
       '</span></td><td>'+esc(m.service)+'<br><span class="n">#'+m.id+(m.complete?'':' · <span class="warnc">incomplete</span>')+'</span></td><td class="body mono">'+
       esc(m.txt)+'</td></tr>').join("")+'</table>'
     :'<div class="empty">no EGC broadcasts in this window</div>';
+  // Columns for the types that say most about traffic; the rest are summed as "other".
+  const COLS=["81","83","aa","a3","a8","08","27","2a","6c","7d","b1"],DN=D.descriptors||{};
+  const st=(s,f)=>{const x=D.stations.find(t=>t.sat===s&&t.freq===f);return x?x.station:"–";};
+  $("tally").innerHTML=D.tally.length?'<table><tr><th>Satellite</th><th>MHz</th><th>Station</th><th class="r">Packets</th>'+
+    COLS.map(c=>'<th class="r" title="'+esc(DN[c]||"")+'">'+c+'</th>').join("")+'<th class="r">other</th><th class="r">kB</th></tr>'+
+    D.tally.map(t=>{const other=Object.entries(t.d).filter(([k])=>!COLS.includes(k)).reduce((a,[,v])=>a+v[0],0);
+      return '<tr><td>'+esc(satName(t.sat))+'</td><td class="mono">'+mhz(t.freq)+'</td><td>'+esc(st(t.sat,t.freq))+'</td><td class="r">'+fmt(t.packets)+'</td>'+
+        COLS.map(c=>'<td class="r n">'+(t.d[c]?fmt(t.d[c][0]):"")+'</td>').join("")+'<td class="r n">'+(other?fmt(other):"")+
+        '</td><td class="r n">'+(t.bytes/1000).toFixed(1)+'</td></tr>';}).join("")+'</table>'
+    :'<div class="empty">no packet tally yet — needs inmarsat-rx with the tally (the per-minute "spkt" archive event)</div>';
+  $("types").innerHTML=D.tally_totals.length?'<table><tr><th>Byte</th><th>Type (tentative)</th><th class="r">Packets</th><th class="r">Bytes</th><th class="r">Mean size</th></tr>'+
+    D.tally_totals.map(([d,n,b])=>'<tr><td class="mono">0x'+d+'</td><td>'+esc(DN[d]||"unknown")+'</td><td class="r">'+fmt(n)+'</td><td class="r n">'+fmt(b)+
+      '</td><td class="r n">'+(b/n).toFixed(1)+'</td></tr>').join("")+'</table>':'<div class="empty">none yet</div>';
   const mx=Math.max(1,...D.by_service.map(s=>s.n));
   $("services").innerHTML=D.by_service.length?'<table>'+D.by_service.map(s=>'<tr><td style="width:1%">'+esc(s.service)+
     '</td><td><span class="bar" style="width:'+Math.max(2,Math.round(300*s.n/mx))+'px;background:var(--c)"></span><span class="n">'+s.n+'</span></td></tr>').join("")+'</table>'

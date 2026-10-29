@@ -32,5 +32,9 @@ void stdc_feed(stdc_t *s, const float *soft, int n, double now_ms);
 // Emits EGC messages still waiting for parts (end of input).
 void stdc_flush(stdc_t *s);
 stdc_stats_t stdc_stats(const stdc_t *s);
+// Packet tally per frame: after each decoded frame, the number of packets with a good checksum
+// and their bytes, by descriptor byte (multiframe contents counted too). Metadata only.
+typedef void (*stdc_frame_cb)(const unsigned *counts, const unsigned *bytes, void *user);
+void stdc_set_frame_cb(stdc_t *s, stdc_frame_cb cb);
 
 #endif

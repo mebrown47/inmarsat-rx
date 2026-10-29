@@ -28,6 +28,9 @@ def window(con, hours, table="msg_hourly", col="hour"):
     """(floor, hmax) hour bounds: the last `hours` hours of data (all when 0), counted back from
     the newest hour in the database rather than the clock, so a replayed recording shows."""
     r = con.execute(f"SELECT MIN({col}), MAX({col}) FROM {table}").fetchone()
+    if r[0] is None and table == "msg_hourly":
+        # No messages yet (a quiet channel): the channel health still sets the window.
+        r = con.execute("SELECT MIN(hour), MAX(hour) FROM chan_hourly").fetchone()
     hmin, hmax = r
     if hmin is None:
         return None, None
