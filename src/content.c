@@ -60,9 +60,10 @@ static void rec_free(rec_t *r) { free(r->text); r->text = NULL; }
 // IA5 text, or NULL when the bytes do not look like text. Control characters other than line
 // breaks and tabs are dropped.
 static char *ia5(const uint8_t *b, int n) {
+	if (n <= 0) return NULL;
 	int printable = 0;
 	for (int i = 0; i < n; i++) { int c = b[i] & 0x7f; printable += (c >= 0x20 && c < 0x7f) || c == '\n' || c == '\r' || c == '\t'; }
-	if (!n || printable < TEXT_SHARE * n) return NULL;
+	if (printable < TEXT_SHARE * n) return NULL;
 	char *t = malloc((size_t)n + 1); int k = 0;
 	for (int i = 0; i < n; i++) {
 		int c = b[i] & 0x7f;
