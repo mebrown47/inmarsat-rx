@@ -29,6 +29,7 @@ struct channel {
 	// EGC messages already emitted: both STD-C paths report the same message.
 	struct { char key[96]; double at; } recent[RECENT]; int recent_next;
 	long egc_count;
+	long last_frames; double progress_ms;   // Aero: frames at the last change, and when (sample time).
 };
 
 static pthread_mutex_t apps_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -225,8 +226,23 @@ void channel_free(channel_t *c) {
 	stdc_free(c->stdc_diff); stdc_free(c->stdc_coh); free(c->tmp); free(c);
 }
 
+// An Aero channel whose carrier search settled on the wrong peak (a weak carrier next to a
+// stronger one) finds no frames there. After this long without one it searches again.
+#define AERO_H_RESEARCH_MS 20000.0
+#define AERO_L_RESEARCH_MS 40000.0
+
 void channel_process(channel_t *c, const float *iq, int n, double now_ms) {
+	if (!c->progress_ms) c->progress_ms = now_ms;
 	c->now = now_ms;
+	if (c->aero) {
+		long frames = aero_stats(c->aero).frames;
+		demod_status_t d = c->msk ? msk_status(c->msk) : psk_status(c->psk);
+		if (frames != c->last_frames || !d.acquired) { c->last_frames = frames; c->progress_ms = now_ms; }
+		else if (now_ms - c->progress_ms > (c->msk ? AERO_L_RESEARCH_MS : AERO_H_RESEARCH_MS)) {
+			if (c->msk) msk_restart(c->msk); else psk_restart(c->psk);
+			c->progress_ms = now_ms;
+		}
+	}
 	const float *s;
 	if (c->msk) {
 		int k = msk_process(c->msk, iq, n, &s);

@@ -32,6 +32,8 @@ typedef struct psk psk_t;
 // reacquire: search for the carrier again after ~2 s without lock (off for Aero, whose frame
 // sync judges lock itself).
 psk_t *psk_new(psk_mode_t mode, double baud, double in_rate, double offset_hz, int reacquire);
+// Searches for the carrier again (the decoder found no frames where the search settled).
+void psk_restart(psk_t *p);
 void psk_free(psk_t *p);
 // Returns the number of symbols; *symbols holds interleaved I/Q (BPSK ±1, QPSK (±1±j)/√2).
 int psk_process(psk_t *p, const float *iq, int n, const float **symbols);
@@ -39,6 +41,7 @@ demod_status_t psk_status(const psk_t *p);
 
 typedef struct msk msk_t;
 msk_t *msk_new(double bit_rate, double in_rate, double offset_hz, int reacquire);
+void msk_restart(msk_t *m);
 void msk_free(msk_t *m);
 // Returns the number of soft bits (positive = 1, the higher tone).
 int msk_process(msk_t *m, const float *iq, int n, const float **bits);
