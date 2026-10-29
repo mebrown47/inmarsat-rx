@@ -177,6 +177,26 @@ static void health_event(double minute_ms, slot_t *s, int n) {
 	jb_raw(&b, "}}");
 	archive_write(minute_ms, b.s);
 	jb_free(&b);
+	// STD-C packet tally for the minute: count and bytes by descriptor byte. Metadata only: no
+	// packet contents are archived.
+	jbuf_t p = {0};
+	jb_printf(&p, "{\"e\":\"spkt\",\"t\":%.0f,\"ch\":{", minute_ms);
+	int anyp = 0;
+	for (int i = 0; i < n; i++) {
+		unsigned long cnt[256], byt[256];
+		if (s[i].trial || !channel_take_tally(s[i].ch, cnt, byt)) continue;
+		channel_info_t ci; channel_info(s[i].ch, &ci);
+		jb_printf(&p, "%s\"%.0f\":{", anyp ? "," : "", ci.freq); anyp = 1;
+		jb_key(&p, "sat"); jb_str(&p, ci.sat);
+		if (ci.les >= 0) { jb_printf(&p, ",\"les\":%d", ci.les); jb_key(&p, "station"); jb_str(&p, ci.station); }
+		jb_raw(&p, ",\"d\":{");
+		int first = 1;
+		for (int d = 0; d < 256; d++) if (cnt[d]) { jb_printf(&p, "%s\"%02x\":[%lu,%lu]", first ? "" : ",", d, cnt[d], byt[d]); first = 0; }
+		jb_raw(&p, "}}");
+	}
+	jb_raw(&p, "}}");
+	if (anyp) archive_write(minute_ms, p.s);
+	jb_free(&p);
 }
 
 // The clusters, and making channels on them. A channel joins the cluster whose passband holds it,

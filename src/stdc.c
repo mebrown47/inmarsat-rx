@@ -77,6 +77,7 @@ typedef struct {
 
 struct stdc {
 	stdc_egc_cb on_egc; stdc_bulletin_cb on_bulletin; void *user;
+	stdc_frame_cb on_frame; unsigned frame_counts[256], frame_bytes[256];
 	float ring[FRAME_SYMBOLS]; int head, filled, since_frame;
 	stdc_stats_t stats;
 	egc_t *egc; int negc, egccap;
@@ -103,6 +104,8 @@ static int packet_length(const uint8_t *frame, int pos, int size) {
 	if ((d & 0xc0) == 0x80) return pos + 1 < size ? frame[pos + 1] + 2 : size - pos;
 	return size - pos;
 }
+
+void stdc_set_frame_cb(stdc_t *s, stdc_frame_cb cb) { s->on_frame = cb; }
 
 stdc_t *stdc_new(stdc_egc_cb on_egc, stdc_bulletin_cb on_bulletin, void *user) {
 	stdc_t *s = calloc(1, sizeof *s);
@@ -233,6 +236,7 @@ static void parse(stdc_t *s, const uint8_t *frame, int size) {
 		int sum = (frame[pos + len - 2] << 8) | frame[pos + len - 1];
 		if (sum != 0 && sum != checksum(frame + pos, len)) { s->stats.packets_bad++; pos += len; continue; }
 		s->stats.packets_ok++;
+		s->frame_counts[d]++; s->frame_bytes[d] += (unsigned)len;
 		packet(s, frame + pos, len);
 		pos += len;
 	}
@@ -277,7 +281,9 @@ static void process_frame(stdc_t *s, int inverted) {
 		frame[k] = (uint8_t)(reverse_byte(frame[k]) ^ (SCRAMBLE[g] ? 0xff : 0));
 	}
 	s->stats.frames++;
+	memset(s->frame_counts, 0, sizeof s->frame_counts); memset(s->frame_bytes, 0, sizeof s->frame_bytes);
 	parse(s, frame, FRAME_BYTES);
+	if (s->on_frame) s->on_frame(s->frame_counts, s->frame_bytes, s->user);
 	expire(s, 0);
 }
 
