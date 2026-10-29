@@ -37,7 +37,7 @@ typedef struct {
 typedef struct { aero_acars_t msg; size_t textcap; int age; } fragment_t;
 
 struct aero {
-	int bit_rate, cols;
+	int bit_rate, cols, raw_blocks;
 	aero_acars_cb on_acars; aero_data_cb on_data; void *user;
 	float *s1, *s2; size_t cap1, cap2; int len;  // H+: I and Q streams. L: s1 = bits.
 	long base, next;                             // Absolute index of s1[0]; next frame start (-1: search).
@@ -91,6 +91,7 @@ void aero_free(aero_t *a) {
 }
 
 aero_stats_t aero_stats(const aero_t *a) { return a->stats; }
+void aero_set_raw_blocks(aero_t *a, int on) { a->raw_blocks = on; }
 
 static int odd_parity(int b) { b ^= b >> 4; b ^= b >> 2; b ^= b >> 1; return b & 1; }
 
@@ -181,7 +182,7 @@ static void complete(aero_t *a, const isu_t *isu) {
 			}
 		}
 		text[t] = 0; msg.text = text;
-		defragment(a, &msg);
+		if (a->raw_blocks) emit(a, &msg); else defragment(a, &msg);
 		free(text);
 		return;
 	}

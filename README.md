@@ -73,6 +73,10 @@ One JSON object per line, the SDR Workbench message-log record (v1):
   `complete: false` and `[…]` where parts are missing.
 - `--data` adds non-ACARS Aero user data (hex), `--bulletins` the STD-C bulletin board of every
   frame.
+- `--blocks` writes one record per ACARS block instead of joining multi-block messages
+  (`meta.more` is true on blocks that end with ETB), as acarsdec-style feeds do.
+- Record times count from the first sample: SigMF `core:datetime`, else `--start TIME` for a raw
+  recording, else the moment the program started.
 
 ## Tests
 

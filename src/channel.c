@@ -197,6 +197,7 @@ channel_t *channel_new(channel_kind_t kind, double freq_hz, double center_hz, do
 		c->aero = aero_new(aero_rate(kind), on_acars, on_aero_data, c);
 		break;
 	}
+	if (c->aero) aero_set_raw_blocks(c->aero, opts->raw_blocks);
 	return c;
 }
 

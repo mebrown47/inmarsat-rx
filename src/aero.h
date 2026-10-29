@@ -30,6 +30,8 @@ void aero_feed_symbols(aero_t *a, const float *iq, int n);
 // Aero-L: soft data bits (positive = 1) from the MSK demodulator.
 void aero_feed_bits(aero_t *a, const float *bits, int n);
 aero_stats_t aero_stats(const aero_t *a);
+// Report every ACARS block as it arrives instead of joining multi-block (ETB) messages.
+void aero_set_raw_blocks(aero_t *a, int on);
 
 uint16_t aero_su_crc(const uint8_t *bytes);
 
