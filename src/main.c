@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 #define MAX_CHANNELS 64
 
@@ -35,6 +36,8 @@ static void usage(FILE *f) {
 		"  -f, --format FMT     cu8, cs8, cs16, cf32 (files; SigMF metadata sets it)\n"
 		"  -s, --rate HZ        sample rate (live: default the lowest rate that covers the channels)\n"
 		"  -F, --center FREQ    centre frequency (live: default midway between the channels)\n"
+		"      --start TIME     UTC time of the first sample of a file, e.g. 2026-10-04T23:38:16Z\n"
+		"                       (SigMF metadata sets it; record times count from it)\n"
 		"  -g, --gain G         airspy: linearity gain 0-21 (default 12); hackrf: LNA,VGA in dB (default 32,20);\n"
 		"                       rtl_tcp: dB (default auto); spyserver: gain index (default: the node's)\n"
 		"  -b, --bias-tee       power the antenna/LNA through the coax (airspy, hackrf, rtl_tcp)\n"
@@ -51,6 +54,8 @@ static void usage(FILE *f) {
 		"  -q, --quiet          no records on stdout (use with --udp)\n"
 		"      --hide-acks      leave out ACARS link acknowledgements (label _d)\n"
 		"      --data           also emit non-ACARS Aero user data (hex)\n"
+		"      --blocks         one record per ACARS block, without joining multi-block messages\n"
+		"                       (meta.more is true on blocks that end with ETB)\n"
 		"      --bulletins      also emit STD-C bulletin boards (one per 8.64 s frame)\n"
 		"      --station NAME   source name in the records (default: the input name)\n"
 		"      --block N        frames per read (default 65536; results do not depend on it)\n"
@@ -95,10 +100,10 @@ int main(int argc, char **argv) {
 	const char *input = "-", *udp = NULL, *station = NULL, *gain = NULL;
 	int bias = 0, amp = 0; double ppm = 0;
 	int format = -1, quiet = 0, threads = 0, block = 65536;
-	double rate = 0, center = 0, stats_every = 30;
+	double rate = 0, center = 0, stats_every = 30, start_arg = 0;
 	channel_opts_t opts = {0};
 	struct { double freq; int kind; } specs[MAX_CHANNELS]; int nspecs = 0;
-	enum { OPT_HIDE_ACKS = 256, OPT_DATA, OPT_BULLETINS, OPT_STATION, OPT_STATS, OPT_BLOCK, OPT_AMP };
+	enum { OPT_HIDE_ACKS = 256, OPT_START, OPT_BLOCKS, OPT_DATA, OPT_BULLETINS, OPT_STATION, OPT_STATS, OPT_BLOCK, OPT_AMP };
 	static const struct option longopts[] = {
 		{"input", required_argument, 0, 'i'}, {"format", required_argument, 0, 'f'},
 		{"rate", required_argument, 0, 's'}, {"center", required_argument, 0, 'F'},
@@ -106,7 +111,7 @@ int main(int argc, char **argv) {
 		{"quiet", no_argument, 0, 'q'}, {"threads", required_argument, 0, 't'},
 		{"gain", required_argument, 0, 'g'}, {"bias-tee", no_argument, 0, 'b'}, {"amp", no_argument, 0, OPT_AMP},
 		{"ppm", required_argument, 0, 'p'},
-		{"hide-acks", no_argument, 0, OPT_HIDE_ACKS}, {"data", no_argument, 0, OPT_DATA},
+		{"hide-acks", no_argument, 0, OPT_HIDE_ACKS}, {"data", no_argument, 0, OPT_DATA}, {"blocks", no_argument, 0, OPT_BLOCKS}, {"start", required_argument, 0, OPT_START},
 		{"bulletins", no_argument, 0, OPT_BULLETINS}, {"station", required_argument, 0, OPT_STATION},
 		{"stats", required_argument, 0, OPT_STATS}, {"block", required_argument, 0, OPT_BLOCK}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
 	int c;
@@ -135,6 +140,13 @@ int main(int argc, char **argv) {
 		case 't': threads = atoi(optarg); break;
 		case OPT_HIDE_ACKS: opts.hide_acks = 1; break;
 		case OPT_DATA: opts.emit_data = 1; break;
+		case OPT_BLOCKS: opts.raw_blocks = 1; break;
+		case OPT_START: {
+			struct tm tm = {0}; const char *rest = strptime(optarg, "%Y-%m-%dT%H:%M:%S", &tm);
+			if (!rest) { fprintf(stderr, "--start wants YYYY-MM-DDTHH:MM:SS[.fff]Z\n"); return 2; }
+			start_arg = ((double)timegm(&tm) + (*rest == '.' ? atof(rest) : 0)) * 1000;
+			break;
+		}
 		case OPT_BULLETINS: opts.emit_bulletins = 1; break;
 		case OPT_STATION: station = optarg; break;
 		case OPT_STATS: stats_every = atof(optarg); break;
@@ -168,7 +180,7 @@ int main(int argc, char **argv) {
 	}
 	if (!in) return 1;
 	if (!in->rate || !in->center_hz) { fprintf(stderr, "Give the sample rate (-s) and centre frequency (-F)\n"); return 2; }
-	double start_ms = in->start_ms ? in->start_ms : wall_ms();
+	double start_ms = start_arg ? start_arg : in->start_ms ? in->start_ms : wall_ms();
 
 	if (out_init(!quiet, udp)) return 1;
 	opts.source_kind = in->live ? "sdr" : "file";

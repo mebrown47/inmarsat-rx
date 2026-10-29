@@ -7,7 +7,7 @@ typedef enum { CH_STDC, CH_AERO_H, CH_AERO_L600, CH_AERO_L1200 } channel_kind_t;
 
 typedef struct {
 	const char *source_kind, *source_name;   // Record "source" field.
-	int hide_acks, emit_data, emit_bulletins;
+	int hide_acks, emit_data, emit_bulletins, raw_blocks;
 } channel_opts_t;
 
 typedef struct channel channel_t;
