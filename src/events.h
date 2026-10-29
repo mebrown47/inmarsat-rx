@@ -27,6 +27,7 @@ typedef struct {
 typedef struct {
 	double freq; const char *sat, *type;
 	int acquired, locked, synced, found;   // found: added by --scan
+	int resting;                           // Aero: no frames for several windows, resting a while
 	double snr_db, offset_hz, ber;         // ber < 0: none yet
 	long frames, units_ok, units_bad, messages;  // units: Aero signal units or STD-C packets
 	int les; char station[48];              // STD-C: the NCS bulletin board's station
