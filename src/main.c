@@ -265,7 +265,7 @@ static void load_mobile_key(const char *path) {
 		}
 		close(w);
 		fprintf(stderr, "inmarsat-rx: made a new key for hashing ships' mobile numbers: %s\n", path);
-		channel_set_mobile_key(key, sizeof key);
+		channel_set_mobile_key(key, sizeof key); content_set_key(key, sizeof key);
 		return;
 	}
 	if (fd < 0 || read(fd, key, sizeof key) != (ssize_t)sizeof key) {
@@ -274,7 +274,7 @@ static void load_mobile_key(const char *path) {
 		return;
 	}
 	close(fd);
-	channel_set_mobile_key(key, sizeof key);
+	channel_set_mobile_key(key, sizeof key); content_set_key(key, sizeof key);
 }
 
 // Frames a trial needs to be kept, and how long it gets: a few frame periods.

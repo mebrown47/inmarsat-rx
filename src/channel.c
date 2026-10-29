@@ -275,7 +275,7 @@ static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, const s
 		const stdc_sig_t *g = &sigs[i];
 		char ship[11] = "";
 		if (g->has_mes && mobile_key_len) mobile_hash(g->mes, ship);
-		if (content_enabled() && (g->desc == 0x81 || g->desc == 0x27))
+		if (content_enabled() && (g->desc == 0x81 || g->desc == 0x27 || g->desc == 0x83 || g->desc == 0x2a))
 			content_signal(c->now, c->freq_hz, c->sat, g->desc, ship[0] ? ship : NULL, g->les, g->lc, g->pres);
 		if (g->has_mes && !mobile_key_len) continue;  // No key: never record a number, hashed or not.
 		events_stdc_sig(&(ev_stdc_sig_t){.t_ms = c->now, .freq = c->freq_hz, .sat = c->sat,

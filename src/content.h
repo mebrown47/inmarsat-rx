@@ -11,9 +11,12 @@
 
 int content_start(const char *dir, int port);  // 0 ok
 int content_enabled(void);
+// The receiver's secret key, for keyed hashes of binary payloads (none without it).
+void content_set_key(const unsigned char *key, int len);
 void content_stop(void);
 
 // From the STD-C channels (after the once-per-frame dedupe). ship: keyed hash or NULL.
+// desc 0x81/0x27 open and close deliveries; 0x83/0x2A record the ship sending.
 void content_signal(double t_ms, double freq, const char *sat, int desc, const char *ship, int les, int lc, int pres);
 void content_packet(double t_ms, double freq, const char *sat, int les, int lc, int pkt_no, const uint8_t *data, int len);
 // Closes deliveries quiet for 15 minutes and drops anything older than 24 hours. Call now and then.
