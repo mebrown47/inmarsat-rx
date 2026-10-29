@@ -9,6 +9,7 @@
 #include "apps.h"
 #include "archive.h"
 #include "channel.h"
+#include "cluster.h"
 #include "input.h"
 #include "out.h"
 #include "plans.h"
@@ -26,6 +27,7 @@
 #include <unistd.h>
 
 #define MAX_CHANNELS 64
+#define MAX_CLUSTERS 32
 #define MAX_TRIALS 6            // --scan: carriers being tried at once
 #define IGNORE_S (30 * 60)      // --scan: a carrier that never synced is not tried again for this long
 #define IDLE_DROP_S (15 * 60)   // --scan: a found channel with no new frames for this long is dropped
@@ -80,6 +82,7 @@ static void usage(FILE *f) {
 		"                       (meta.more is true on blocks that end with ETB)\n"
 		"      --bulletins      also emit STD-C bulletin boards (one per 8.64 s frame)\n"
 		"      --station NAME   this receiver's name, in the records and on the live page\n"
+		"      --no-clusters    give every channel its own full-rate first stage (for comparison)\n"
 		"      --block N        frames per read (default about 50 ms, at most 65536; results do not depend on it)\n"
 		"      --stats SEC      per-channel status on stderr every SEC seconds of samples (default 30, 0 = off)\n"
 		"  -t, --threads N      decoding threads (default: one per channel, at most the CPU count)\n"
@@ -103,11 +106,13 @@ typedef struct {
 	long prev_frames, prev_ok, prev_bad, prev_msgs;  // Totals at the last health minute.
 	long seen_frames; double progress_s;             // Frames at the last change, and when.
 	int trial, types[3], ntypes, ti; double trial_start;
+	int cl;                                          // Its cluster (the shared first stage).
 } slot_t;
 
 typedef struct {
 	slot_t *slots; int nchannels, nthreads;
-	pthread_barrier_t start, done;
+	cluster_t *clusters; int nclusters;
+	pthread_barrier_t start, mid, done;
 	const float *iq; int n; double now_ms; int quit;
 } pool_t;
 typedef struct { pool_t *pool; int index; } worker_arg_t;
@@ -117,7 +122,13 @@ static void *worker(void *arg) {
 	for (;;) {
 		pthread_barrier_wait(&p->start);
 		if (p->quit) return NULL;
-		for (int i = w->index; i < p->nchannels; i += p->nthreads) channel_process(p->slots[i].ch, p->iq, p->n, p->now_ms);
+		// First the clusters narrow the block, then every channel works on its cluster's output.
+		for (int i = w->index; i < p->nclusters; i += p->nthreads) cluster_process(&p->clusters[i], p->iq, p->n);
+		pthread_barrier_wait(&p->mid);
+		for (int i = w->index; i < p->nchannels; i += p->nthreads) {
+			const cluster_t *c = &p->clusters[p->slots[i].cl];
+			channel_process(p->slots[i].ch, c->out, c->n, p->now_ms);
+		}
 		pthread_barrier_wait(&p->done);
 	}
 }
@@ -168,6 +179,38 @@ static void health_event(double minute_ms, slot_t *s, int n) {
 	jb_free(&b);
 }
 
+// The clusters, and making channels on them. A channel joins the cluster whose passband holds it,
+// or gets a cluster of its own; clusters no channel uses any more are freed between blocks.
+static cluster_t clusters[MAX_CLUSTERS]; static int nclusters;
+static double in_rate_g, in_center_g; static int clusters_off;
+
+static int cluster_for(double freq) {
+	int i = cluster_find(clusters, nclusters, freq);
+	if (i >= 0) return i;
+	if (nclusters == MAX_CLUSTERS) return 0;  // Cannot happen with 64 channels in 32 clusters of 250 kHz; stay safe.
+	clusters[nclusters] = (cluster_t){.center = freq, .half = 0};
+	if (clusters_off) clusters[nclusters].passthrough = 1, clusters[nclusters].rate = in_rate_g, clusters[nclusters].center = in_center_g;
+	else cluster_init(&clusters[nclusters], in_rate_g, in_center_g);
+	return nclusters++;
+}
+
+static channel_t *make_channel(slot_t *s, int kind, double freq, const char *sat, int found, const channel_opts_t *opts) {
+	s->cl = cluster_for(freq);
+	const cluster_t *c = &clusters[s->cl];
+	return channel_new(kind, freq, sat, found, c->center, c->rate, opts);
+}
+
+static void clusters_gc(slot_t *slots, int nslots) {
+	for (int i = 0; i < nclusters;) {
+		int used = 0;
+		for (int k = 0; k < nslots; k++) used |= slots[k].cl == i;
+		if (used) { i++; continue; }
+		cluster_free(&clusters[i]);
+		clusters[i] = clusters[--nclusters];
+		for (int k = 0; k < nslots; k++) if (slots[k].cl == nclusters) slots[k].cl = i;
+	}
+}
+
 // Frames a trial needs to be kept, and how long it gets: a few frame periods.
 static double trial_seconds(int kind) { return kind == CH_STDC ? 30 : kind == CH_AERO_H ? 10 : kind == CH_AERO_L1200 ? 20 : 40; }
 static long trial_frames(int kind) { return kind == CH_STDC ? 2 : 3; }
@@ -181,7 +224,7 @@ int main(int argc, char **argv) {
 	channel_opts_t opts = {0};
 	spec_t specs[MAX_CHANNELS]; int nspecs = 0;
 	enum { OPT_HIDE_ACKS = 256, OPT_START, OPT_BLOCKS, OPT_DATA, OPT_BULLETINS, OPT_STATION, OPT_STATS, OPT_BLOCK, OPT_AMP,
-		OPT_PLAN, OPT_PLANS, OPT_SAT, OPT_SCAN, OPT_SCAN_PERIOD, OPT_ARCHIVE, OPT_WEB, OPT_OBS_PORT };
+		OPT_PLAN, OPT_PLANS, OPT_SAT, OPT_SCAN, OPT_SCAN_PERIOD, OPT_ARCHIVE, OPT_WEB, OPT_OBS_PORT, OPT_NO_CLUSTERS };
 	static const struct option longopts[] = {
 		{"input", required_argument, 0, 'i'}, {"format", required_argument, 0, 'f'},
 		{"rate", required_argument, 0, 's'}, {"center", required_argument, 0, 'F'},
@@ -195,7 +238,7 @@ int main(int argc, char **argv) {
 		{"plan", required_argument, 0, OPT_PLAN}, {"plans", no_argument, 0, OPT_PLANS}, {"sat", required_argument, 0, OPT_SAT},
 		{"scan", no_argument, 0, OPT_SCAN}, {"scan-period", required_argument, 0, OPT_SCAN_PERIOD},
 		{"archive", required_argument, 0, OPT_ARCHIVE}, {"web", required_argument, 0, OPT_WEB},
-		{"observatory-port", required_argument, 0, OPT_OBS_PORT}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
+		{"observatory-port", required_argument, 0, OPT_OBS_PORT}, {"no-clusters", no_argument, 0, OPT_NO_CLUSTERS}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
 	int c;
 	while ((c = getopt_long(argc, argv, "i:f:s:F:c:u:qt:g:bp:h", longopts, NULL)) != -1) {
 		switch (c) {
@@ -246,6 +289,7 @@ int main(int argc, char **argv) {
 		case OPT_ARCHIVE: archive_dir = optarg; break;
 		case OPT_WEB: web_port = atoi(optarg); break;
 		case OPT_OBS_PORT: obs_port = atoi(optarg); break;
+		case OPT_NO_CLUSTERS: clusters_off = 1; break;
 		case 'h': usage(stdout); return 0;
 		default: usage(stderr); return 2;
 		}
@@ -312,6 +356,15 @@ int main(int argc, char **argv) {
 	slot_t slots[MAX_CHANNELS] = {0}; int nslots = 0, skipped = 0;
 	// Keep channels clear of the band edge, where the SDR's own filter rolls off.
 	const double usable = in->rate / 2 - fmin(5000, 0.15 * in->rate);
+	// Clusters for the channels given at the start; --scan adds to them, or adds more.
+	in_rate_g = in->rate; in_center_g = in->center_hz;
+	if (!clusters_off) {
+		double fs[MAX_CHANNELS]; int nf = 0;
+		for (int i = 0; i < nspecs; i++) if (fabs(specs[i].freq - in->center_hz) <= usable) fs[nf++] = specs[i].freq;
+		for (int i = 1; i < nf; i++) for (int j = i; j > 0 && fs[j - 1] > fs[j]; j--) { double t = fs[j]; fs[j] = fs[j - 1]; fs[j - 1] = t; }
+		nclusters = cluster_plan(fs, nf, clusters, MAX_CLUSTERS);
+		for (int i = 0; i < nclusters; i++) cluster_init(&clusters[i], in->rate, in->center_hz);
+	}
 	for (int i = 0; i < nspecs; i++) {
 		if (fabs(specs[i].freq - in->center_hz) > usable) {
 			if (plan) { skipped++; continue; }  // Plans may list more than the band holds.
@@ -319,10 +372,17 @@ int main(int argc, char **argv) {
 				specs[i].freq / 1e6, in->center_hz / 1e6, in->rate / 2e3);
 			return 2;
 		}
-		slots[nslots++].ch = channel_new(specs[i].kind, specs[i].freq, specs[i].sat, 0, in->center_hz, in->rate, &opts);
+		slot_t *s = &slots[nslots++];
+		s->ch = make_channel(s, specs[i].kind, specs[i].freq, specs[i].sat, 0, &opts);
 	}
 	fprintf(stderr, "inmarsat-rx: %s, %.0f S/s at %.4f MHz, %d channel%s%s%s\n", in->name, in->rate, in->center_hz / 1e6,
 		nslots, nslots == 1 ? "" : "s", scanner_note(scan), apps_available() ? "" : " (built without libacars: no CPDLC/ADS-C decode)");
+	for (int i = 0; i < nclusters; i++) {
+		int n = 0; for (int k = 0; k < nslots; k++) n += slots[k].cl == i;
+		if (clusters[i].passthrough) continue;
+		fprintf(stderr, "inmarsat-rx: cluster %.4f MHz ± %.0f kHz at %.0f S/s: %d channel%s\n", clusters[i].center / 1e6,
+			clusters[i].half / 1e3, clusters[i].rate, n, n == 1 ? "" : "s");
+	}
 	if (skipped) fprintf(stderr, "inmarsat-rx: %d plan channel%s outside %.4f MHz ± %.0f kHz skipped\n", skipped,
 		skipped == 1 ? "" : "s", in->center_hz / 1e6, in->rate / 2e3);
 	if (archive_enabled()) {
@@ -343,9 +403,10 @@ int main(int argc, char **argv) {
 	if (threads <= 0) threads = scan ? (int)ncpu : nslots < ncpu ? nslots : (int)ncpu;
 	if (threads < 1) threads = 1;
 	if (threads > MAX_CHANNELS) threads = MAX_CHANNELS;
-	pool_t pool = {.slots = slots, .nchannels = nslots, .nthreads = threads};
+	pool_t pool = {.slots = slots, .nchannels = nslots, .nthreads = threads, .clusters = clusters, .nclusters = nclusters};
 	pthread_t tids[MAX_CHANNELS]; worker_arg_t args[MAX_CHANNELS];
 	pthread_barrier_init(&pool.start, NULL, threads + 1);
+	pthread_barrier_init(&pool.mid, NULL, threads);   // Workers only: clusters done before channels start.
 	pthread_barrier_init(&pool.done, NULL, threads + 1);
 	for (int i = 0; i < threads; i++) { args[i] = (worker_arg_t){&pool, i}; pthread_create(&tids[i], NULL, worker, &args[i]); }
 
@@ -364,6 +425,7 @@ int main(int argc, char **argv) {
 			dropped_total += input_dropped; input_dropped = 0;
 		}
 		pool.iq = bufs[k]; pool.n = n; pool.now_ms = start_ms + consumed / in->rate * 1000; pool.nchannels = nslots;
+		pool.nclusters = nclusters;
 		pthread_barrier_wait(&pool.start);
 		if (scanner) scan_feed(scanner, bufs[k], n);  // Alongside the workers.
 		pthread_barrier_wait(&pool.done);
@@ -391,7 +453,7 @@ int main(int argc, char **argv) {
 					double f = ci.freq; const char *sat = ci.sat;
 					char satc[24]; snprintf(satc, sizeof satc, "%s", sat);
 					channel_free(s->ch);
-					s->ch = channel_new(s->types[s->ti], f, satc, 1, in->center_hz, in->rate, &opts);
+					s->ch = make_channel(s, s->types[s->ti], f, satc, 1, &opts);
 					s->trial_start = seconds; s->seen_frames = 0;
 				} else { drop = 1; why = "no frame sync"; }
 			} else if (!s->trial && ci.found && seconds - s->progress_s > IDLE_DROP_S) { drop = 1; why = "no frames for 15 min"; }
@@ -429,12 +491,13 @@ int main(int argc, char **argv) {
 			slot_t *s = &slots[nslots];
 			memset(s, 0, sizeof *s);
 			s->trial = 1; memcpy(s->types, types, sizeof types); s->ntypes = nt; s->ti = 0; s->trial_start = seconds;
-			s->ch = channel_new(types[0], cr->freq, sat_default, 1, in->center_hz, in->rate, &opts);
+			s->ch = make_channel(s, types[0], cr->freq, sat_default, 1, &opts);
 			nslots++;
 			fprintf(stderr, "scan: trying %.4f MHz (%.0f Hz wide, +%.1f dB) as %s\n", cr->freq / 1e6, cr->width, cr->snr_db,
 				channel_kind_name(types[0]));
 		}
 		for (int g = 0; g < nignore;) if (seconds >= ignore[g].until) ignore[g] = ignore[--nignore]; else g++;
+		if (scanner) clusters_gc(slots, nslots);
 
 		if (web_enabled() && seconds >= next_web) {
 			channel_info_t infos[MAX_CHANNELS]; int ni = 0;
@@ -453,6 +516,7 @@ int main(int argc, char **argv) {
 	print_status(slots, nslots, consumed / in->rate);
 	web_stop();
 	for (int i = 0; i < nslots; i++) channel_free(slots[i].ch);
+	for (int i = 0; i < nclusters; i++) cluster_free(&clusters[i]);
 	scan_free(scanner);
 	in->close(in); out_close(); archive_close();
 	free(bufs[0]); free(bufs[1]);

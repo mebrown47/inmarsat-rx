@@ -28,7 +28,7 @@ add_custom_command(
 add_executable(inmarsat-rx
 	src/main.c src/channel.c src/dsp.c src/frontend.c src/psk.c src/msk.c src/fec.c
 	src/aero.c src/stdc.c src/apps.c src/out.c src/input_file.c src/input_live.c
-	src/plans.c src/events.c src/archive.c src/web.c src/scan.c ${CMAKE_CURRENT_BINARY_DIR}/web_page.c)
+	src/plans.c src/events.c src/archive.c src/web.c src/scan.c src/cluster.c ${CMAKE_CURRENT_BINARY_DIR}/web_page.c)
 target_link_libraries(inmarsat-rx m Threads::Threads)
 
 if(LIBACARS_FOUND)

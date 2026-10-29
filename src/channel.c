@@ -30,9 +30,73 @@ struct channel {
 	struct { char key[96]; double at; } recent[RECENT]; int recent_next;
 	long egc_count;
 	long last_frames; double progress_ms;   // Aero: frames at the last change, and when (sample time).
+	// Satellite votes for a channel found by --scan (sat "?"): aircraft also heard on a known one.
+	struct { char sat[24]; int n; } votes[4]; int nvotes, total_votes; char last_voter[8];
 };
 
 static pthread_mutex_t apps_lock = PTHREAD_MUTEX_INITIALIZER;
+
+// ---- Naming the satellite of a channel --scan found ----
+// STD-C: every NCS and LES carrier announces its ocean region in its bulletin board. A plan channel
+// (satellite known) teaches which satellite reports which region; a found channel reporting the
+// same region is on that satellite.
+// Aero: an aircraft is logged on to one satellite at a time, so a found carrier is on the satellite
+// its aircraft were recently heard on through channels whose satellite is known. It is named once
+// at least SAT_VOTES different aircraft say so and at least 80 % of all votes agree.
+#define SAT_VOTES 3
+#define AES_RECENT_MS (60 * 60 * 1000.0)
+#define AES_SLOTS 4096
+static pthread_mutex_t sat_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct { char region[16], sat[24]; } regions[16]; static int nregions;
+static struct { char aes[8], sat[24]; double t; } aes_sat[AES_SLOTS];
+
+static int unknown_sat(const channel_t *c) { return !strcmp(c->sat, "?"); }
+
+static void set_sat(channel_t *c, const char *sat, const char *why) {
+	char tmp[24]; snprintf(tmp, sizeof tmp, "%s", sat);
+	memcpy(c->sat, tmp, sizeof tmp);
+	fprintf(stderr, "satellite: %.4f MHz (%s) is on %s — %s\n", c->freq_hz / 1e6, channel_kind_name(c->kind), tmp, why);
+}
+
+static void learn_region(channel_t *c, const char *region) {
+	pthread_mutex_lock(&sat_lock);
+	int i;
+	for (i = 0; i < nregions; i++) if (!strcmp(regions[i].region, region)) break;
+	if (!unknown_sat(c) && !c->found) {
+		if (i == nregions && nregions < 16) nregions++;
+		if (i < 16) { snprintf(regions[i].region, sizeof regions[i].region, "%s", region); snprintf(regions[i].sat, sizeof regions[i].sat, "%s", c->sat); }
+	} else if (unknown_sat(c) && i < nregions) {
+		char why[64]; snprintf(why, sizeof why, "its bulletin board says %s, as %s's NCS does", region, regions[i].sat);
+		set_sat(c, regions[i].sat, why);
+	}
+	pthread_mutex_unlock(&sat_lock);
+}
+
+static unsigned aes_slot(const char *aes) { unsigned h = 2166136261u; for (; *aes; aes++) h = (h ^ (unsigned char)*aes) * 16777619u; return h % AES_SLOTS; }
+
+static void learn_aircraft(channel_t *c, const char *aes) {
+	pthread_mutex_lock(&sat_lock);
+	unsigned k = aes_slot(aes);
+	if (!unknown_sat(c) && !c->found) {
+		// One slot per hash: a collision only forgets an older aircraft.
+		snprintf(aes_sat[k].aes, sizeof aes_sat[k].aes, "%s", aes); snprintf(aes_sat[k].sat, sizeof aes_sat[k].sat, "%s", c->sat);
+		aes_sat[k].t = c->now;
+	} else if (unknown_sat(c) && !strcmp(aes_sat[k].aes, aes) && c->now - aes_sat[k].t < AES_RECENT_MS && strcmp(c->last_voter, aes)) {
+		snprintf(c->last_voter, sizeof c->last_voter, "%s", aes);
+		int i;
+		for (i = 0; i < c->nvotes; i++) if (!strcmp(c->votes[i].sat, aes_sat[k].sat)) break;
+		if (i == c->nvotes && c->nvotes < 4) { snprintf(c->votes[i].sat, sizeof c->votes[i].sat, "%s", aes_sat[k].sat); c->votes[i].n = 0; c->nvotes++; }
+		if (i < 4) c->votes[i].n++;
+		c->total_votes++;
+		for (i = 0; i < c->nvotes; i++)
+			if (c->votes[i].n >= SAT_VOTES && c->votes[i].n * 5 >= c->total_votes * 4) {
+				char why[80]; snprintf(why, sizeof why, "%d of %d aircraft checked were last heard on %s", c->votes[i].n, c->total_votes, c->votes[i].sat);
+				set_sat(c, c->votes[i].sat, why);
+				break;
+			}
+	}
+	pthread_mutex_unlock(&sat_lock);
+}
 
 int channel_kind_parse(const char *s) {
 	if (!strcmp(s, "stdc")) return CH_STDC;
@@ -66,6 +130,7 @@ static void record_head(jbuf_t *b, const channel_t *c, const char *key, const ch
 static void on_acars(const aero_acars_t *m, void *user) {
 	channel_t *c = user;
 	int ack = !strcmp(m->label, "_d");
+	learn_aircraft(c, m->aes);
 	apps_t apps; int has_app = 0;
 	if (m->text[0]) {
 		pthread_mutex_lock(&apps_lock);  // libacars is not documented as thread-safe.
@@ -183,6 +248,7 @@ static void on_bulletin(const stdc_bulletin_t *e, void *user) {
 	channel_t *c = user;
 	c->have_station = 1; c->les = e->les;
 	snprintf(c->station, sizeof c->station, "%s · LES %d", e->satellite, e->les);
+	learn_region(c, e->satellite);
 	if (!c->opts.emit_bulletins) return;
 	char key[48]; snprintf(key, sizeof key, "stdc:bb:%d", e->frame_number);
 	jbuf_t b = {0};
