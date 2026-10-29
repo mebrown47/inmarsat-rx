@@ -25,6 +25,9 @@
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
 
 #define MAX_CHANNELS 64
 #define MAX_CLUSTERS 32
@@ -81,6 +84,8 @@ static void usage(FILE *f) {
 		"      --blocks         one record per ACARS block, without joining multi-block messages\n"
 		"                       (meta.more is true on blocks that end with ETB)\n"
 		"      --bulletins      also emit STD-C bulletin boards (one per 8.64 s frame)\n"
+		"      --mobile-key FILE  secret key for hashing ships' mobile numbers in STD-C metadata (default\n"
+		"                       ~/.config/inmarsat-rx/mobile.key, made on first use; keep it out of shared archives)\n"
 		"      --station NAME   this receiver's name, in the records and on the live page\n"
 		"      --no-clusters    give every channel its own full-rate first stage (for comparison)\n"
 		"      --block N        frames per read (default about 50 ms, at most 65536; results do not depend on it)\n"
@@ -231,20 +236,58 @@ static void clusters_gc(slot_t *slots, int nslots) {
 	}
 }
 
+// The secret key for hashing ships' mobile numbers: 32 random bytes in a file only this user can
+// read, made on first use. Without it, packets that carry a mobile number are not recorded at all.
+static void load_mobile_key(const char *path) {
+	char def[512];
+	if (!path) {
+		const char *home = getenv("HOME");
+		if (!home) { fprintf(stderr, "inmarsat-rx: no HOME and no --mobile-key: STD-C ship metadata off\n"); return; }
+		snprintf(def, sizeof def, "%s/.config/inmarsat-rx", home);
+		mkdir(def, 0700);  // Its parent ~/.config normally exists; an error shows up at open() below.
+		snprintf(def, sizeof def, "%s/.config/inmarsat-rx/mobile.key", home);
+		path = def;
+	}
+	unsigned char key[32];
+	int fd = open(path, O_RDONLY);
+	if (fd < 0 && errno == ENOENT) {
+		int r = open("/dev/urandom", O_RDONLY), ok = r >= 0 && read(r, key, sizeof key) == (ssize_t)sizeof key;
+		if (r >= 0) close(r);
+		int w = ok ? open(path, O_WRONLY | O_CREAT | O_EXCL, 0600) : -1;
+		if (w < 0 || write(w, key, sizeof key) != (ssize_t)sizeof key) {
+			fprintf(stderr, "inmarsat-rx: cannot create %s: STD-C ship metadata off\n", path);
+			if (w >= 0) close(w);
+			return;
+		}
+		close(w);
+		fprintf(stderr, "inmarsat-rx: made a new key for hashing ships' mobile numbers: %s\n", path);
+		channel_set_mobile_key(key, sizeof key);
+		return;
+	}
+	if (fd < 0 || read(fd, key, sizeof key) != (ssize_t)sizeof key) {
+		fprintf(stderr, "inmarsat-rx: cannot read %s: STD-C ship metadata off\n", path);
+		if (fd >= 0) close(fd);
+		return;
+	}
+	close(fd);
+	channel_set_mobile_key(key, sizeof key);
+}
+
 // Frames a trial needs to be kept, and how long it gets: a few frame periods.
 static double trial_seconds(int kind) { return kind == CH_STDC ? 30 : kind == CH_AERO_H ? 10 : kind == CH_AERO_L1200 ? 20 : 40; }
 static long trial_frames(int kind) { return kind == CH_STDC ? 2 : 3; }
 
 int main(int argc, char **argv) {
 	const char *input = "-", *udp = NULL, *station = NULL, *gain = NULL, *plan = NULL, *sat_default = NULL;
-	const char *archive_dir = NULL;
+	const char *archive_dir = NULL, *mobile_key_path = NULL;
 	int bias = 0, amp = 0, scan = 0, web_port = 0, obs_port = 8893; double ppm = 0, scan_period = 30;
 	int format = -1, quiet = 0, threads = 0, block = 0;
 	double rate = 0, center = 0, stats_every = 30, start_arg = 0;
 	channel_opts_t opts = {0};
 	spec_t specs[MAX_CHANNELS]; int nspecs = 0;
 	enum { OPT_HIDE_ACKS = 256, OPT_START, OPT_BLOCKS, OPT_DATA, OPT_BULLETINS, OPT_STATION, OPT_STATS, OPT_BLOCK, OPT_AMP,
-		OPT_PLAN, OPT_PLANS, OPT_SAT, OPT_SCAN, OPT_SCAN_PERIOD, OPT_ARCHIVE, OPT_WEB, OPT_OBS_PORT, OPT_NO_CLUSTERS };
+		OPT_PLAN, OPT_PLANS, OPT_SAT, OPT_SCAN, OPT_SCAN_PERIOD, OPT_ARCHIVE, OPT_WEB, OPT_OBS_PORT, OPT_NO_CLUSTERS,
+		OPT_MOBILE_KEY };
 	static const struct option longopts[] = {
 		{"input", required_argument, 0, 'i'}, {"format", required_argument, 0, 'f'},
 		{"rate", required_argument, 0, 's'}, {"center", required_argument, 0, 'F'},
@@ -258,7 +301,8 @@ int main(int argc, char **argv) {
 		{"plan", required_argument, 0, OPT_PLAN}, {"plans", no_argument, 0, OPT_PLANS}, {"sat", required_argument, 0, OPT_SAT},
 		{"scan", no_argument, 0, OPT_SCAN}, {"scan-period", required_argument, 0, OPT_SCAN_PERIOD},
 		{"archive", required_argument, 0, OPT_ARCHIVE}, {"web", required_argument, 0, OPT_WEB},
-		{"observatory-port", required_argument, 0, OPT_OBS_PORT}, {"no-clusters", no_argument, 0, OPT_NO_CLUSTERS}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
+		{"observatory-port", required_argument, 0, OPT_OBS_PORT}, {"no-clusters", no_argument, 0, OPT_NO_CLUSTERS},
+		{"mobile-key", required_argument, 0, OPT_MOBILE_KEY}, {"help", no_argument, 0, 'h'}, {0, 0, 0, 0}};
 	int c;
 	while ((c = getopt_long(argc, argv, "i:f:s:F:c:u:qt:g:bp:h", longopts, NULL)) != -1) {
 		switch (c) {
@@ -310,6 +354,7 @@ int main(int argc, char **argv) {
 		case OPT_WEB: web_port = atoi(optarg); break;
 		case OPT_OBS_PORT: obs_port = atoi(optarg); break;
 		case OPT_NO_CLUSTERS: clusters_off = 1; break;
+		case OPT_MOBILE_KEY: mobile_key_path = optarg; break;
 		case 'h': usage(stdout); return 0;
 		default: usage(stderr); return 2;
 		}
@@ -367,6 +412,7 @@ int main(int argc, char **argv) {
 	// Reads of about 50 ms: messages are timed by the read they finish in.
 	if (!block) block = (int)fmin(65536, fmax(1024, in->rate / 20));
 	if (out_init(!quiet, udp)) return 1;
+	load_mobile_key(mobile_key_path);
 	if (archive_dir && archive_open(archive_dir)) return 1;
 	if (web_port && web_start(web_port, station, obs_port)) return 1;
 	web_receiver(in->name, in->center_hz, in->rate, gain, bias);

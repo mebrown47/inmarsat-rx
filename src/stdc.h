@@ -32,9 +32,23 @@ void stdc_feed(stdc_t *s, const float *soft, int n, double now_ms);
 // Emits EGC messages still waiting for parts (end of input).
 void stdc_flush(stdc_t *s);
 stdc_stats_t stdc_stats(const stdc_t *s);
-// Packet tally per frame: after each decoded frame, the number of packets with a good checksum
-// and their bytes, by descriptor byte (multiframe contents counted too). Metadata only.
-typedef void (*stdc_frame_cb)(const unsigned *counts, const unsigned *bytes, void *user);
+// Signalling metadata from one packet: which kind, which ship (its 24-bit mobile number, for the
+// caller to hash), which LES and logical channel, and sizes. Never message contents.
+typedef struct {
+	int desc;                  // Descriptor byte.
+	int has_mes; unsigned mes; // Mobile earth station (ship) number, when the packet carries one.
+	int les, sat;              // Target LES and its satellite code, or -1.
+	int lc;                    // Logical channel, or -1.
+	int pres;                  // Announcement: presentation (0 IA5, else other), or -1.
+	int pkt_no, payload;       // Message packet: sequence number and payload bytes; else -1, 0.
+} stdc_sig_t;
+#define STDC_MAX_SIGS 64
+
+// Packet tally and signalling per frame: after each decoded frame, the number of packets with a
+// good checksum and their bytes by descriptor byte (multiframe contents counted too), and the
+// signalling metadata. Metadata only.
+typedef void (*stdc_frame_cb)(const unsigned *counts, const unsigned *bytes, const stdc_sig_t *sigs, int nsigs,
+	void *user);
 void stdc_set_frame_cb(stdc_t *s, stdc_frame_cb cb);
 
 #endif

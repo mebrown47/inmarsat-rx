@@ -35,5 +35,7 @@ channel_kind_t channel_kind(const channel_t *c);
 // STD-C: the packet tally (count and bytes by descriptor byte) since the last call, then zeroed.
 // Returns 0 for other channels or when there is nothing to report. Call between blocks.
 int channel_take_tally(channel_t *c, unsigned long counts[256], unsigned long bytes[256]);
+// The secret key for hashing ships' mobile numbers (HMAC-SHA256). Set once, before decoding.
+void channel_set_mobile_key(const unsigned char *key, int len);
 
 #endif
