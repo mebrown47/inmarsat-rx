@@ -33,7 +33,7 @@
 #define MAX_OPEN 128
 #define MAX_PKTS 256
 #define MAX_RECS 20000
-#define TEXT_SHARE 0.85   // At least this share of printable IA5 characters to show as text.
+#define TEXT_SHARE 0.95   // At least this share of printable IA5 characters to show as text.
 
 typedef struct { int no, len; uint8_t data[256]; } pkt_t;
 typedef struct {
@@ -57,13 +57,26 @@ int content_enabled(void) { return enabled; }
 
 static void rec_free(rec_t *r) { free(r->text); r->text = NULL; }
 
-// IA5 text, or NULL when the bytes do not look like text. Control characters other than line
-// breaks and tabs are dropped.
+// Whether bytes read as IA5 text. Random bytes are printable in 7 bits three times in four, so
+// printability alone passes short binary payloads; text also has word breaks and is mostly letters.
+static int looks_like_text(const uint8_t *b, int n) {
+	int printable = 0, breaks = 0, alnum = 0;
+	for (int i = 0; i < n; i++) {
+		int c = b[i] & 0x7f;
+		printable += (c >= 0x20 && c < 0x7f) || c == '\n' || c == '\r' || c == '\t';
+		breaks += c == ' ' || c == '\n' || c == '\r' || c == '\t';
+		alnum += (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+	}
+	// Symbols: printable, not a letter, digit or break. About a quarter of random bytes; few in text.
+	int symbols = printable - breaks - alnum;
+	if (printable < TEXT_SHARE * n || alnum < 0.5 * n || symbols > 0.2 * n) return 0;
+	return n < 12 || breaks * 25 >= n;  // At least one break per 25 characters, as words and lines give.
+}
+
+// IA5 text with control characters other than line breaks and tabs dropped (no test of whether
+// it is text: see looks_like_text).
 static char *ia5(const uint8_t *b, int n) {
 	if (n <= 0) return NULL;
-	int printable = 0;
-	for (int i = 0; i < n; i++) { int c = b[i] & 0x7f; printable += (c >= 0x20 && c < 0x7f) || c == '\n' || c == '\r' || c == '\t'; }
-	if (printable < TEXT_SHARE * n) return NULL;
 	char *t = malloc((size_t)n + 1); int k = 0;
 	for (int i = 0; i < n; i++) {
 		int c = b[i] & 0x7f;
@@ -109,10 +122,9 @@ static void finish(open_t *o) {
 			prev = o->pkts[i].no; uniq++;
 			memcpy(all + n, o->pkts[i].data, o->pkts[i].len); n += o->pkts[i].len;
 		}
-		// Decide text or binary on the whole, then build the text with […] at each gap.
-		char *probe = ia5(all, n);
-		if (probe) {
-			free(probe);
+		// Text or binary: the announcement's presentation says (0 = IA5 text; 7 seen on data); when
+		// it was missed, judge by the bytes. Then build the text with […] at each gap.
+		if (o->pres == 0 || (o->pres < 0 && looks_like_text(all, n))) {
 			prev = -1;
 			for (int i = 0; i < o->npkts; i++) {
 				if (o->pkts[i].no == prev) continue;
@@ -125,6 +137,11 @@ static void finish(open_t *o) {
 				text[tlen] = 0;
 				prev = o->pkts[i].no;
 			}
+			// Messages often start and end with blank lines: trim them.
+			size_t st = 0;
+			while (text && (text[st] == '\n' || text[st] == ' ')) st++;
+			if (text && st) memmove(text, text + st, strlen(text + st) + 1);
+			for (size_t e = text ? strlen(text) : 0; e && (text[e - 1] == '\n' || text[e - 1] == ' '); e--) text[e - 1] = 0;
 		} else binary = 1;
 		rec_t r = {.t = o->t_open, .freq = o->freq, .les = o->les, .lc = o->lc, .pres = o->pres, .packets = uniq,
 			.missing = missing, .bytes = n, .binary = binary, .text = text};
