@@ -286,6 +286,16 @@ static void load(double now_ms) {
 			if (json_num(line, "binary", &v)) r.binary = (int)v;
 			char *t = malloc(cap + 1);
 			if (json_str(line, "text", t, cap + 1)) r.text = t; else free(t);
+			// Saved by an older build that judged text by printability alone: apply today's rule.
+			if (r.text && !r.binary && (r.pres > 0 || (r.pres < 0 && !looks_like_text((const uint8_t *)r.text, (int)strlen(r.text))))) {
+				free(r.text); r.text = NULL; r.binary = 1;
+			}
+			if (r.text) {  // And trim blank lines at either end, as new deliveries are.
+				size_t st = 0;
+				while (r.text[st] == '\n' || r.text[st] == ' ') st++;
+				if (st) memmove(r.text, r.text + st, strlen(r.text + st) + 1);
+				for (size_t e = strlen(r.text); e && (r.text[e - 1] == '\n' || r.text[e - 1] == ' '); e--) r.text[e - 1] = 0;
+			}
 			if (nrecs < MAX_RECS) recs[nrecs++] = r; else rec_free(&r);
 		}
 		fclose(f);
