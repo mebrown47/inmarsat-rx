@@ -30,6 +30,7 @@ struct channel {
 	struct { char key[96]; double at; } recent[RECENT]; int recent_next;
 	long egc_count;
 	long last_frames; double progress_ms;   // Aero: frames at the last change, and when (sample time).
+	int fails; double rest_until;            // Aero: listening windows without a frame; resting until.
 	// Satellite votes for a channel found by --scan (sat "?"): aircraft also heard on a known one.
 	struct { char sat[24]; int n; } votes[4]; int nvotes, total_votes; char last_voter[8];
 };
@@ -296,17 +297,33 @@ void channel_free(channel_t *c) {
 // stronger one) finds no frames there. After this long without one it searches again.
 #define AERO_H_RESEARCH_MS 20000.0
 #define AERO_L_RESEARCH_MS 40000.0
+// A carrier that is absent or too weak here would keep its demodulator busy for nothing. After
+// AERO_FAILS_BEFORE_REST windows in a row without a frame it rests (processes no samples), for
+// AERO_REST_MS, doubling each time it wakes and still finds nothing, up to AERO_REST_MAX_MS. Any
+// frame resets it. P-channels transmit continuously, so a rested channel misses little.
+#define AERO_FAILS_BEFORE_REST 3
+#define AERO_REST_MS 60000.0
+#define AERO_REST_MAX_MS 300000.0
 
 void channel_process(channel_t *c, const float *iq, int n, double now_ms) {
 	if (!c->progress_ms) c->progress_ms = now_ms;
 	c->now = now_ms;
 	if (c->aero) {
+		if (now_ms < c->rest_until) return;
 		long frames = aero_stats(c->aero).frames;
 		demod_status_t d = c->msk ? msk_status(c->msk) : psk_status(c->psk);
-		if (frames != c->last_frames || !d.acquired) { c->last_frames = frames; c->progress_ms = now_ms; }
+		if (frames != c->last_frames) { c->last_frames = frames; c->progress_ms = now_ms; c->fails = 0; }
+		else if (!d.acquired) c->progress_ms = now_ms;
 		else if (now_ms - c->progress_ms > (c->msk ? AERO_L_RESEARCH_MS : AERO_H_RESEARCH_MS)) {
 			if (c->msk) msk_restart(c->msk); else psk_restart(c->psk);
 			c->progress_ms = now_ms;
+			if (++c->fails >= AERO_FAILS_BEFORE_REST) {
+				double rest = AERO_REST_MS * (double)(1 << (c->fails - AERO_FAILS_BEFORE_REST < 8 ? c->fails - AERO_FAILS_BEFORE_REST : 8));
+				if (rest > AERO_REST_MAX_MS) rest = AERO_REST_MAX_MS;
+				c->rest_until = now_ms + rest;
+				c->progress_ms = c->rest_until;  // It wakes to a full listening window.
+				return;
+			}
 		}
 	}
 	const float *s;
@@ -339,7 +356,7 @@ void channel_flush(channel_t *c) {
 void channel_status(const channel_t *c, char *buf, int size) {
 	demod_status_t d = c->msk ? msk_status(c->msk) : psk_status(c->psk);
 	int n = snprintf(buf, size, "%.4f %-9s %s off %+6.1f Hz snr %4.1f dB", c->freq_hz / 1e6, channel_kind_name(c->kind),
-		!d.acquired ? "search" : d.locked ? "lock  " : "track ", d.offset_hz, d.snr_db);
+		c->now < c->rest_until ? "rest  " : !d.acquired ? "search" : d.locked ? "lock  " : "track ", d.offset_hz, d.snr_db);
 	if (c->aero) {
 		aero_stats_t a = aero_stats(c->aero);
 		snprintf(buf + n, size - n, " | %s frames %ld ber %.1f%% SU %ld/%ld msgs %ld", a.synced ? "SYNC" : "----",
@@ -359,7 +376,8 @@ channel_kind_t channel_kind(const channel_t *c) { return c->kind; }
 void channel_info(const channel_t *c, channel_info_t *i) {
 	demod_status_t d = c->msk ? msk_status(c->msk) : psk_status(c->psk);
 	*i = (channel_info_t){.freq = c->freq_hz, .sat = c->sat, .type = channel_kind_name(c->kind), .found = c->found,
-		.acquired = d.acquired, .locked = d.locked, .snr_db = d.snr_db, .offset_hz = d.offset_hz, .les = -1};
+		.acquired = d.acquired, .locked = d.locked, .snr_db = d.snr_db, .offset_hz = d.offset_hz, .les = -1,
+		.resting = c->now < c->rest_until};
 	if (c->aero) {
 		aero_stats_t a = aero_stats(c->aero);
 		i->synced = a.synced; i->ber = a.ber; i->frames = a.frames; i->units_ok = a.su_ok; i->units_bad = a.su_bad;

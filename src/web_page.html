@@ -188,7 +188,7 @@ function render(){
       (ncs?" · NCS "+esc(ncs.station):"")+'</span></h3><table><tr><th>MHz</th><th>Service</th><th>State</th><th class="r">SNR</th>'+
       '<th class="r">Offset</th><th class="r">BER</th><th class="r">Frames</th><th class="r">Units OK</th><th class="r">Messages</th></tr>';
     for(const c of cs){
-      const st=c.synced?["sync","in sync"]:c.locked?["lock","locked, no frames"]:c.acquired?["","tracking"]:["","searching"];
+      const st=c.resting?["","resting (no frames here; tries again soon)"]:c.synced?["sync","in sync"]:c.locked?["lock","locked, no frames"]:c.acquired?["","tracking"]:["","searching"];
       const tot=c.ok+c.bad,pct=tot?100*c.ok/tot:0;
       h+='<tr><td class="mono">'+mhz(c.freq)+(c.found?' <span class="n" title="added by --scan">·scan</span>':'')+'</td><td>'+svc(c.type)+
         '</td><td><span class="st '+st[0]+'"><i></i>'+st[1]+'</span></td><td class="r n">'+(c.acquired?c.snr.toFixed(1)+" dB":"–")+

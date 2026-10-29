@@ -170,8 +170,8 @@ static void state_json(jbuf_t *b) {
 		const channel_info_t *c = &chans[i];
 		jb_raw(b, i ? ",{" : "{");
 		jb_key(b, "freq"); jb_printf(b, "%.0f", c->freq); jb_key(b, "sat"); jb_str(b, c->sat); jb_key(b, "type"); jb_str(b, c->type);
-		jb_printf(b, ",\"acquired\":%d,\"locked\":%d,\"synced\":%d,\"found\":%d,\"snr\":%.1f,\"offset\":%.1f,\"ber\":",
-			c->acquired, c->locked, c->synced, c->found, c->snr_db, c->offset_hz);
+		jb_printf(b, ",\"acquired\":%d,\"locked\":%d,\"synced\":%d,\"found\":%d,\"resting\":%d,\"snr\":%.1f,\"offset\":%.1f,\"ber\":",
+			c->acquired, c->locked, c->synced, c->found, c->resting, c->snr_db, c->offset_hz);
 		if (c->ber < 0) jb_raw(b, "null"); else jb_printf(b, "%.4f", c->ber);
 		jb_printf(b, ",\"frames\":%ld,\"ok\":%ld,\"bad\":%ld,\"msgs\":%ld", c->frames, c->units_ok, c->units_bad, c->messages);
 		if (c->les >= 0) { jb_printf(b, ",\"les\":%d", c->les); jb_key(b, "station"); jb_str(b, c->station); }
