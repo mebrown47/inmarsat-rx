@@ -138,7 +138,8 @@ function mhz(f){return (f/1e6).toFixed(4);}
 function card(k,v,sub){return '<div class="card"><div class="k">'+k+'</div><div class="v">'+v+
   (sub?' <small>'+sub+'</small>':'')+'</div></div>';}
 function svc(t){return '<span class="svc '+t+'">'+(SVC[t]||t)+'</span>';}
-function satName(id){const s=(D.satellites||[]).find(x=>x.id===id);return s?s.name:id;}
+// "?": a carrier --scan found, which could be on any satellite the antenna sees.
+function satName(id){if(id==="?")return "Unassigned";const s=(D.satellites||[]).find(x=>x.id===id);return s?s.name:id;}
 function keep(sat,type){return (F.sat==="all"||F.sat===sat)&&(F.svc==="all"||F.svc===SVCGROUP[type]);}
 function save(){try{localStorage.setItem("inmarsat-live-filters",JSON.stringify(F));}catch(e){}}
 function chips(id,label,opts,cur,set){

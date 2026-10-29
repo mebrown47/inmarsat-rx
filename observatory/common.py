@@ -14,6 +14,8 @@ SATELLITES = {
     "i4f3": {"name": "I-4 F3", "slot": "98°W", "region": "Americas"},
     "i3f5": {"name": "I-3 F5", "slot": "54°W", "region": "Atlantic"},
     "alphasat": {"name": "Alphasat", "slot": "25°E", "region": "Europe, Africa"},
+    # Carriers --scan found when more than one satellite is in view: no way to tell which.
+    "?": {"name": "Unassigned", "slot": "", "region": "found by --scan"},
 }
 SERVICES = {"aero": "Aero-H+ 10.5k", "aerol600": "Aero-L 600", "aerol1200": "Aero-L 1200", "stdc": "STD-C"}
 
