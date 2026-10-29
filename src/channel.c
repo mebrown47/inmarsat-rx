@@ -3,6 +3,7 @@
 // Channels and their JSON records. The record shape is the SDR Workbench message log's
 // (log/records.js, v1), so the same tools read both.
 #include "channel.h"
+#include "content.h"
 #include "aero.h"
 #include "apps.h"
 #include "demod.h"
@@ -264,7 +265,8 @@ static void mobile_hash(unsigned mes, char out[11]) {
 	for (int i = 0; i < 5; i++) snprintf(out + 2 * i, 3, "%02x", h[i]);
 }
 
-static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, const stdc_sig_t *sigs, int nsigs, void *user) {
+static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, const stdc_sig_t *sigs, int nsigs,
+	const stdc_msgpkt_t *msgs, int nmsgs, void *user) {
 	channel_t *c = user;
 	if (c->tally_frame_ms && c->now - c->tally_frame_ms < 4000) return;
 	c->tally_frame_ms = c->now;
@@ -272,14 +274,16 @@ static void on_stdc_frame(const unsigned *counts, const unsigned *bytes, const s
 	for (int i = 0; i < nsigs; i++) {
 		const stdc_sig_t *g = &sigs[i];
 		char ship[11] = "";
-		if (g->has_mes) {
-			if (!mobile_key_len) continue;  // No key: never record a number, hashed or not.
-			mobile_hash(g->mes, ship);
-		}
+		if (g->has_mes && mobile_key_len) mobile_hash(g->mes, ship);
+		if (content_enabled() && (g->desc == 0x81 || g->desc == 0x27))
+			content_signal(c->now, c->freq_hz, c->sat, g->desc, ship[0] ? ship : NULL, g->les, g->lc, g->pres);
+		if (g->has_mes && !mobile_key_len) continue;  // No key: never record a number, hashed or not.
 		events_stdc_sig(&(ev_stdc_sig_t){.t_ms = c->now, .freq = c->freq_hz, .sat = c->sat,
 			.chan_les = c->have_station ? c->les : -1, .desc = g->desc, .ship = g->has_mes ? ship : NULL,
 			.les = g->les, .lc = g->lc, .pres = g->pres, .pkt_no = g->pkt_no, .payload = g->payload});
 	}
+	for (int i = 0; i < nmsgs && content_enabled(); i++)
+		content_packet(c->now, c->freq_hz, c->sat, msgs[i].les, msgs[i].lc, msgs[i].pkt_no, msgs[i].data, msgs[i].len);
 }
 
 int channel_take_tally(channel_t *c, unsigned long counts[256], unsigned long bytes[256]) {
@@ -318,6 +322,7 @@ channel_t *channel_new(channel_kind_t kind, double freq_hz, const char *sat, int
 		c->stdc_diff = stdc_new(on_egc, on_bulletin, c);
 		c->stdc_coh = stdc_new(on_egc, on_bulletin, c);
 		stdc_set_frame_cb(c->stdc_diff, on_stdc_frame); stdc_set_frame_cb(c->stdc_coh, on_stdc_frame);
+		stdc_set_content(c->stdc_diff, opts->content); stdc_set_content(c->stdc_coh, opts->content);
 		break;
 	case CH_AERO_H:
 		// Aero frame sync judges lock itself, so the demodulator keeps tracking instead of re-searching.

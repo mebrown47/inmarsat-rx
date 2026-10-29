@@ -24,11 +24,17 @@ add_custom_command(
 	COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/src/web_page.html
 		-DOUT=${CMAKE_CURRENT_BINARY_DIR}/web_page.c -DNAME=WEB_PAGE -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed.cmake
 	DEPENDS src/web_page.html cmake/embed.cmake)
+add_custom_command(
+	OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/content_page.c
+	COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/src/content_page.html
+		-DOUT=${CMAKE_CURRENT_BINARY_DIR}/content_page.c -DNAME=CONTENT_PAGE -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed.cmake
+	DEPENDS src/content_page.html cmake/embed.cmake)
 
 add_executable(inmarsat-rx
 	src/main.c src/channel.c src/dsp.c src/frontend.c src/psk.c src/msk.c src/fec.c
 	src/aero.c src/stdc.c src/apps.c src/out.c src/input_file.c src/input_live.c
-	src/plans.c src/events.c src/archive.c src/web.c src/scan.c src/cluster.c src/sha256.c ${CMAKE_CURRENT_BINARY_DIR}/web_page.c)
+	src/plans.c src/events.c src/archive.c src/web.c src/scan.c src/cluster.c src/sha256.c src/content.c ${CMAKE_CURRENT_BINARY_DIR}/web_page.c
+	${CMAKE_CURRENT_BINARY_DIR}/content_page.c)
 target_link_libraries(inmarsat-rx m Threads::Threads)
 
 if(LIBACARS_FOUND)
