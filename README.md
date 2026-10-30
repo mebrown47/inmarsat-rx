@@ -59,7 +59,8 @@ Like iridium-observatory and vdl2-observatory, inmarsat-rx comes with two pages:
 | Port | What | Shows |
 |---|---|---|
 | 8892 | **Live** (`inmarsat-rx --web 8892`) | what the receiver hears now: every channel by satellite and service (sync, SNR, BER, units OK), ACARS with CPDLC/ADS-C decoded, aircraft, ground stations, STD-C EGC |
-| 8893 | **Observatory** (`observatory/server.py`) | history from the archive: Overview (traffic by service, channel health per satellite, ground stations, busiest aircraft, channels `--scan` added), Aviation (per-aircraft history, CPDLC and ADS-C logs), Maritime (EGC by priority) |
+| 8893 | **Observatory** (`observatory/server.py`) | history from the archive: Overview (traffic by service, channel health per satellite, ground stations, busiest aircraft, channels `--scan` added), Aviation (per-aircraft history, CPDLC and ADS-C logs), Maritime (EGC by priority, STD-C ship traffic as metadata) |
+| 8894 | **STD-C messages**, opt-in (`--stdc-content DIR`) | messages to individual ships, on 127.0.0.1 only: see [STD-C ship traffic](#std-c-ship-traffic) |
 
 Every record carries a satellite and a service (Aero-H+, Aero-L 600/1200, STD-C), and both pages
 filter by either. The Observatory reads a database that `observatory/rollup.py` folds from the
@@ -91,6 +92,27 @@ CSAT and LES 12 NL Burum on both satellites (each from the header of a message t
 and LES 44 is the NCS. Others show as "LES n". To add or correct names, put a `les_names.json`
 beside the Observatory database, e.g. `{"i3f5:4": "Name"}` (satellite id, colon, LES number); the
 Observatory reads it again when it changes.
+
+## STD-C ship traffic
+
+Besides EGC broadcasts, the STD-C channels carry signalling for individual ships: messages
+announced to a ship, logical channel assignments, acknowledgements, polls. These carry the ship's
+mobile number, so inmarsat-rx never records it as such:
+
+- **Metadata** (the archive, the live page and the Observatory's Maritime page) shows each ship as a
+  keyed hash: HMAC-SHA256 of its mobile number with a secret key, `~/.config/inmarsat-rx/mobile.key`
+  (made on first use, mode 600; `--mobile-key FILE` to choose another). The same ship keeps the same
+  hash on one receiver, but the number cannot be recovered or matched without the key, so keep the
+  key out of anything you share. Without a key, packets that carry a mobile number are not
+  recorded at all.
+- **Message content** is off unless asked for. `--stdc-content DIR` rebuilds the messages to ships
+  from the land earth stations' channels for a page served on **127.0.0.1 only**
+  (`--content-port`, default 8894; reach it through an SSH tunnel). Deliveries are kept 24 hours in
+  `DIR` (mode 700, files 600) and are never archived, sent over UDP, written to stdout or shown on
+  the shared pages. Ships appear as the same keyed hash. Text is shown as sent; binary content is
+  described (size, how random the bytes are, keyed hashes to group identical payloads and those that
+  open alike) but no byte of it is shown or kept. Each delivery shows whether the ship sent
+  something soon after (a channel assignment and an acknowledged message).
 
 ## Output
 

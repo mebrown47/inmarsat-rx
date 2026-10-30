@@ -6,3 +6,8 @@ __pycache__/
 *.db-shm
 *.db-wal
 *.lock
+
+# Local only: an evaluation run on a receiver (archive, database, STD-C messages), keys, scripts
+eval/
+*.key
+resume_*.sh
