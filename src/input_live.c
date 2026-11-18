@@ -119,7 +119,9 @@ static double pick_rate(const double *rates, int n, double half_span, double wan
 	return rates[n - 1];
 }
 
+#ifdef HAVE_AIRSPY
 static int cmp_double(const void *a, const void *b) { double x = *(const double *)a, y = *(const double *)b; return x < y ? -1 : x > y; }
+#endif
 
 static void list_rates(const double *r, int n) {
 	fprintf(stderr, "Rates offered:");
