@@ -26,7 +26,7 @@ In progress: recordings, `rtl_tcp` and SpyServer sources, stdout, UDP, the archi
 pages are being brought up first; Airspy and HackRF over USB follow. In an MSYS2 **UCRT64** shell:
 
 ```bash
-pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,python}
+pacman -S --needed git diffutils mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,python}
 cmake -S . -B build -G Ninja && cmake --build build
 tests/run_tests.sh build
 ```

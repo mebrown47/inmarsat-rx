@@ -20,6 +20,11 @@ check() { if eval "$2"; then echo "ok   $1"; pass=$((pass+1)); else echo "FAIL $
 CH="-c 1545.060:aerol600:i4f3 -c 1545.065:aerol600:i4f3"
 
 [ -x "$BIN" ] || { echo "no binary at $BIN"; echo "RESULT: 0 passed, 1 failed"; exit 1; }
+# Tools the checks use. A missing one would fail its check as if the program were wrong (MSYS2's
+# base install, for one, has no cmp or diff: pacman -S diffutils).
+missing=""
+for t in cmp diff sed sort grep python3; do command -v "$t" >/dev/null || missing="$missing $t"; done
+[ -z "$missing" ] || { echo "missing tools:$missing (on MSYS2: pacman -S diffutils, and python for python3)"; echo "RESULT: 0 passed, 1 failed"; exit 1; }
 check "plans list I-4 F3" "'$BIN' --plans | grep -q '^  i4f3 '"
 
 # Decode: every frame, no channel errors, and the messages a check of the recording found.
