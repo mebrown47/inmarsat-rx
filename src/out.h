@@ -15,8 +15,10 @@ void jb_str(jbuf_t *b, const char *s);           // JSON string literal, or null
 void jb_key(jbuf_t *b, const char *k);           // ,"k": (comma unless right after '{').
 void jb_free(jbuf_t *b);
 
-// Sinks. stdout is on unless out_init(0, ...). udp: "host:port" or NULL.
-int out_init(int to_stdout, const char *udp);
+// Sinks. stdout is on unless out_init(0). UDP destinations first: "host:port", several
+// comma-separated or one per call, up to 8.
+int out_add_udp(const char *list);  // 0 ok
+int out_init(int to_stdout);
 // Writes one record (a JSON object without trailing newline) to every sink.
 void out_emit(const char *json);
 void out_close(void);

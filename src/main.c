@@ -75,7 +75,8 @@ static void usage(FILE *f) {
 		"      --scan-period S  seconds of spectrum averaged per scan (default 30)\n"
 		"\n"
 		"Output:\n"
-		"  -u, --udp HOST:PORT  also send each record as a UDP datagram\n"
+		"  -u, --udp HOST:PORT  also send each record as a UDP datagram; up to 8 destinations, comma-separated\n"
+		"                       or -u again (a name that does not resolve yet is tried every 10 s)\n"
 		"  -q, --quiet          no records on stdout (use with --udp, --archive or --web)\n"
 		"      --archive DIR    JSONL archive for the Observatory (inmarsat-YYYYMMDD.jsonl)\n"
 		"      --web PORT       live page on this port (e.g. 8892)\n"
@@ -90,7 +91,7 @@ static void usage(FILE *f) {
 		"      --content-port PORT  its port (default 8894)\n"
 		"      --mobile-key FILE  secret key for hashing ships' mobile numbers in STD-C metadata (default\n"
 		"                       ~/.config/inmarsat-rx/mobile.key, made on first use; keep it out of shared archives)\n"
-		"      --station NAME   this receiver's name, in the records and on the live page\n"
+		"      --station NAME   this receiver's name, in the records and on the live page (also --station-id)\n"
 		"      --no-clusters    give every channel its own full-rate first stage (for comparison)\n"
 		"      --block N        frames per read (default about 50 ms, at most 65536; results do not depend on it)\n"
 		"      --stats SEC      per-channel status on stderr every SEC seconds of samples (default 30, 0 = off)\n"
@@ -282,7 +283,7 @@ static double trial_seconds(int kind) { return kind == CH_STDC ? 30 : kind == CH
 static long trial_frames(int kind) { return kind == CH_STDC ? 2 : 3; }
 
 int main(int argc, char **argv) {
-	const char *input = "-", *udp = NULL, *station = NULL, *gain = NULL, *plan = NULL, *sat_default = NULL;
+	const char *input = "-", *station = NULL, *gain = NULL, *plan = NULL, *sat_default = NULL;
 	const char *archive_dir = NULL, *mobile_key_path = NULL, *content_dir = NULL;
 	int content_port = 8894;
 	int bias = 0, amp = 0, scan = 0, web_port = 0, obs_port = 8893; double ppm = 0, scan_period = 30;
@@ -301,7 +302,7 @@ int main(int argc, char **argv) {
 		{"gain", required_argument, 0, 'g'}, {"bias-tee", no_argument, 0, 'b'}, {"amp", no_argument, 0, OPT_AMP},
 		{"ppm", required_argument, 0, 'p'}, {"hide-acks", no_argument, 0, OPT_HIDE_ACKS}, {"data", no_argument, 0, OPT_DATA},
 		{"blocks", no_argument, 0, OPT_BLOCKS}, {"start", required_argument, 0, OPT_START},
-		{"bulletins", no_argument, 0, OPT_BULLETINS}, {"station", required_argument, 0, OPT_STATION},
+		{"bulletins", no_argument, 0, OPT_BULLETINS}, {"station", required_argument, 0, OPT_STATION}, {"station-id", required_argument, 0, OPT_STATION},
 		{"stats", required_argument, 0, OPT_STATS}, {"block", required_argument, 0, OPT_BLOCK},
 		{"plan", required_argument, 0, OPT_PLAN}, {"plans", no_argument, 0, OPT_PLANS}, {"sat", required_argument, 0, OPT_SAT},
 		{"scan", no_argument, 0, OPT_SCAN}, {"scan-period", required_argument, 0, OPT_SCAN_PERIOD},
@@ -331,7 +332,7 @@ int main(int argc, char **argv) {
 			nspecs++;
 			break;
 		}
-		case 'u': udp = optarg; break;
+		case 'u': if (out_add_udp(optarg)) return 1; break;
 		case 'g': gain = optarg; break;
 		case 'b': bias = 1; break;
 		case 'p': ppm = atof(optarg); break;
@@ -419,7 +420,7 @@ int main(int argc, char **argv) {
 
 	// Reads of about 50 ms: messages are timed by the read they finish in.
 	if (!block) block = (int)fmin(65536, fmax(1024, in->rate / 20));
-	if (out_init(!quiet, udp)) return 1;
+	if (out_init(!quiet)) return 1;
 	load_mobile_key(mobile_key_path);
 	if (content_dir) { if (content_start(content_dir, content_port)) return 1; opts.content = 1; }
 	if (archive_dir && archive_open(archive_dir)) return 1;

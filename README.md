@@ -32,9 +32,13 @@ inmarsat-rx -i spyserver:HOST:PORT -c 1537.1056:stdc
 # A recording (SigMF metadata supplies rate, centre and format)
 inmarsat-rx -i capture.sigmf-meta -c 1545.1697:aerol600
 
-# Feed a collector over UDP, nothing on stdout
-inmarsat-rx -i airspy -b -c 1545.1697:aerol600 -u collector.example:5555 -q
+# Feed collectors over UDP (up to 8: comma-separated or -u again), nothing on stdout
+inmarsat-rx -i airspy -b -c 1545.1697:aerol600 -u 127.0.0.1:5555,collector.example:5555 --station-id XX-INMR -q
 ```
+
+A UDP destination whose name does not resolve yet, at boot say, is tried again every 10 s; the
+others are fed meanwhile. The feed carries ACARS and EGC records (and Aero user data and bulletins
+when asked for), never STD-C ship signalling or message content.
 
 Channel types:
 
