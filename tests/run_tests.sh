@@ -8,7 +8,11 @@
 set -uo pipefail
 BUILD="${1:-build}"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BUILD_DIR from where you are, else from the repository root (so tests/run_tests.sh build and
+# ./run_tests.sh build both work).
+[ -d "$BUILD" ] || [ ! -d "$HERE/../$BUILD" ] || BUILD="$HERE/../$BUILD"
 BIN="$BUILD/inmarsat-rx"
+[ -f "$BIN" ] || [ ! -f "$BIN.exe" ] || BIN="$BIN.exe"   # Windows (MSYS2)
 DATA="$HERE/data/aerol600-i4f3-12k5.sigmf-meta"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 pass=0; fail=0
