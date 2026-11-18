@@ -42,7 +42,7 @@ struct aero {
 	int bit_rate, cols, raw_blocks;
 	aero_acars_cb on_acars; aero_data_cb on_data; void *user;
 	float *s1, *s2; size_t cap1, cap2; int len;  // H+: I and Q streams. L: s1 = bits.
-	long base, next;                             // Absolute index of s1[0]; next frame start (-1: search).
+	long long base, next;                        // Absolute index of s1[0]; next frame start (-1: search). 64-bit: long is 32 on Windows.
 	float prev; int parity;
 	aero_stats_t stats;
 	isu_t isus[MAX_ISUS]; int nisus;
