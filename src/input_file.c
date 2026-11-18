@@ -3,6 +3,7 @@
 // File and stdin input, with SigMF metadata when present.
 #define _GNU_SOURCE
 #include "input.h"
+#include "compat.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,7 +111,7 @@ input_t *input_open_file(const char *path, int format) {
 		free(json);
 		p->f = fopen(data, "rb");
 		if (!p->f) { perror(data); free(p); free(in); return NULL; }
-	} else p->f = stdin;
+	} else { compat_stdin_binary(); p->f = stdin; }
 	if (p->format < 0) { fprintf(stderr, "%s: give the sample format with -f (cu8, cs8, cs16, cf32)\n", data); fclose(p->f); free(p); free(in); return NULL; }
 	p->bytes = BYTES[p->format];
 	snprintf(in->name, sizeof in->name, "%.255s", data);

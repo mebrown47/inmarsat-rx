@@ -5,15 +5,12 @@
 #include "web.h"
 #include "out.h"
 #include "plans.h"
-#include <arpa/inet.h>
+#include "compat.h"
 #include <errno.h>
-#include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -266,10 +263,9 @@ static void *serve(void *arg) {
 		if (select(listen_fd + 1, &rf, NULL, NULL, &tv) <= 0) continue;
 		int fd = accept(listen_fd, NULL, NULL);
 		if (fd < 0) continue;
-		struct timeval to = {2, 0};
-		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof to); setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof to);
+		sock_timeouts(fd, 2, 2);
 		handle(fd);
-		close(fd);
+		sock_close(fd);
 	}
 	return NULL;
 }
@@ -278,12 +274,12 @@ int web_start(int port, const char *sid, int observatory_port) {
 	snprintf(station_id, sizeof station_id, "%s", sid ? sid : "");
 	obs_port = observatory_port; started = wall_now();
 	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (listen_fd < 0) { perror("web: socket"); return -1; }
-	int one = 1; setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+	if (listen_fd < 0) { fprintf(stderr, "web: socket: %s\n", sock_err()); return -1; }
+	sock_reuse(listen_fd);
 	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_ANY), .sin_port = htons((uint16_t)port)};
 	if (bind(listen_fd, (struct sockaddr *)&addr, sizeof addr) < 0 || listen(listen_fd, 16) < 0) {
-		fprintf(stderr, "inmarsat-rx: --web cannot listen on port %d: %s\n", port, strerror(errno));
-		close(listen_fd); listen_fd = -1; return -1;
+		fprintf(stderr, "inmarsat-rx: --web cannot listen on port %d: %s\n", port, sock_err());
+		sock_close(listen_fd); listen_fd = -1; return -1;
 	}
 	running = 1;
 	pthread_create(&thread, NULL, serve, NULL);
@@ -295,5 +291,5 @@ void web_stop(void) {
 	if (!running) return;
 	running = 0;
 	pthread_join(thread, NULL);
-	close(listen_fd); listen_fd = -1;
+	sock_close(listen_fd); listen_fd = -1;
 }

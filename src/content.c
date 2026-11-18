@@ -19,18 +19,15 @@
 #include "content.h"
 #include "out.h"
 #include "sha256.h"
-#include <arpa/inet.h>
+#include "compat.h"
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
-#include <netinet/in.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/select.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <time.h>
@@ -153,7 +150,7 @@ static void file_append(const rec_t *r) {
 	time_t tt = (time_t)(r->t / 1000); struct tm g; gmtime_r(&tt, &g);
 	char path[700];
 	snprintf(path, sizeof path, "%s/deliveries-%04d%02d%02d%02d.jsonl", dir, g.tm_year + 1900, g.tm_mon + 1, g.tm_mday, g.tm_hour);
-	int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+	int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_BINARY, 0600);
 	if (fd < 0) { fprintf(stderr, "content: cannot write %s: %s\n", path, strerror(errno)); return; }
 	jbuf_t b = {0};
 	jb_printf(&b, "{\"t\":%.0f,\"freq\":%.0f", r->t, r->freq); jb_key(&b, "sat"); jb_str(&b, r->sat);
@@ -169,7 +166,7 @@ static void up_append(const up_t *u) {
 	time_t tt = (time_t)(u->t / 1000); struct tm g; gmtime_r(&tt, &g);
 	char path[700];
 	snprintf(path, sizeof path, "%s/uplinks-%04d%02d%02d%02d.jsonl", dir, g.tm_year + 1900, g.tm_mon + 1, g.tm_mday, g.tm_hour);
-	int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+	int fd = open(path, O_WRONLY | O_CREAT | O_APPEND | O_BINARY, 0600);
 	if (fd < 0) { fprintf(stderr, "content: cannot write %s: %s\n", path, strerror(errno)); return; }
 	char line[128];
 	int n = snprintf(line, sizeof line, "{\"t\":%.0f,\"ship\":\"%s\",\"desc\":%d,\"les\":%d}\n", u->t, u->ship, u->desc, u->les);
@@ -366,7 +363,7 @@ static void load(double now_ms) {
 		int is_up = !strncmp(e->d_name, "uplinks-", 8);
 		if (strncmp(e->d_name, "deliveries-", 11) && !is_up) continue;
 		char path[800]; snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-		FILE *f = fopen(path, "r");
+		FILE *f = fopen(path, "rb");
 		if (!f) continue;
 		while (getline(&line, &cap, f) > 0) {
 			if (is_up) {
@@ -487,30 +484,29 @@ static void *serve(void *arg) {
 		if (select(listen_fd + 1, &rf, NULL, NULL, &tv) <= 0) continue;
 		int fd = accept(listen_fd, NULL, NULL);
 		if (fd < 0) continue;
-		struct timeval to = {2, 0};
-		setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &to, sizeof to); setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &to, sizeof to);
+		sock_timeouts(fd, 2, 2);
 		handle(fd);
-		close(fd);
+		sock_close(fd);
 	}
 	return NULL;
 }
 
 int content_start(const char *d, int port) {
 	snprintf(dir, sizeof dir, "%s", d);
-	if (mkdir(dir, 0700) && errno != EEXIST) { fprintf(stderr, "content: cannot create %s: %s\n", dir, strerror(errno)); return -1; }
+	if (compat_mkdir(dir, 0700) && errno != EEXIST) { fprintf(stderr, "content: cannot create %s: %s\n", dir, strerror(errno)); return -1; }
 	chmod(dir, 0700);
 	struct timeval tv; gettimeofday(&tv, NULL);
 	double now = tv.tv_sec * 1000.0;
 	prune_files(now);
 	load(now);
 	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
-	if (listen_fd < 0) { perror("content: socket"); return -1; }
-	int one = 1; setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+	if (listen_fd < 0) { fprintf(stderr, "content: socket: %s\n", sock_err()); return -1; }
+	sock_reuse(listen_fd);
 	// Loopback only: reach it from elsewhere through an SSH tunnel.
 	struct sockaddr_in addr = {.sin_family = AF_INET, .sin_addr.s_addr = htonl(INADDR_LOOPBACK), .sin_port = htons((uint16_t)port)};
 	if (bind(listen_fd, (struct sockaddr *)&addr, sizeof addr) < 0 || listen(listen_fd, 8) < 0) {
-		fprintf(stderr, "content: cannot listen on 127.0.0.1:%d: %s\n", port, strerror(errno));
-		close(listen_fd); listen_fd = -1; return -1;
+		fprintf(stderr, "content: cannot listen on 127.0.0.1:%d: %s\n", port, sock_err());
+		sock_close(listen_fd); listen_fd = -1; return -1;
 	}
 	enabled = running = 1;
 	pthread_create(&thread, NULL, serve, NULL);
@@ -526,6 +522,6 @@ void content_stop(void) {
 	pthread_mutex_unlock(&lock);
 	running = 0;
 	pthread_join(thread, NULL);
-	close(listen_fd);
+	sock_close(listen_fd);
 	enabled = 0;
 }

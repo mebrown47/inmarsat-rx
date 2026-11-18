@@ -5,17 +5,14 @@
 // while the ring is full are dropped and counted.
 #define _GNU_SOURCE
 #include "input.h"
+#include "compat.h"
 #include <errno.h>
 #include <math.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 #ifdef HAVE_AIRSPY
@@ -232,12 +229,12 @@ static int tcp_connect(const char *hostport, const char *what) {
 	for (struct addrinfo *a = res; a; a = a->ai_next) {
 		fd = socket(a->ai_family, SOCK_STREAM, 0);
 		if (fd >= 0 && connect(fd, a->ai_addr, a->ai_addrlen) == 0) break;
-		if (fd >= 0) close(fd);
+		if (fd >= 0) sock_close(fd);
 		fd = -1;
 	}
 	freeaddrinfo(res);
-	if (fd < 0) { fprintf(stderr, "%s %s: cannot connect (%s)\n", what, hostport, strerror(errno)); return -1; }
-	int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
+	if (fd < 0) { fprintf(stderr, "%s %s: cannot connect (%s)\n", what, hostport, sock_err()); return -1; }
+	int one = 1; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
 	return fd;
 }
 
@@ -253,7 +250,7 @@ static int read_full(int fd, void *buf, size_t n) {
 static void net_stop(live_t *l) {
 	if (l->fd >= 0) shutdown(l->fd, SHUT_RDWR);
 	if (l->running) pthread_join(l->thread, NULL);
-	if (l->fd >= 0) close(l->fd);
+	if (l->fd >= 0) sock_close(l->fd);
 	l->fd = -1;
 	ring_close(&l->ring);
 }
@@ -262,7 +259,7 @@ static void net_stop(live_t *l) {
 
 static void rtl_cmd(int fd, int cmd, uint32_t v) {
 	uint8_t b[5] = {(uint8_t)cmd, v >> 24, v >> 16, v >> 8, v};
-	send(fd, b, 5, MSG_NOSIGNAL);
+	send(fd, (const char *)b, 5, MSG_NOSIGNAL);
 }
 
 static void *rtl_thread(void *arg) {
@@ -270,7 +267,7 @@ static void *rtl_thread(void *arg) {
 	uint8_t buf[65536];
 	int carry = 0;
 	for (;;) {
-		ssize_t r = recv(l->fd, buf + carry, sizeof buf - carry, 0);
+		ssize_t r = recv(l->fd, (char *)buf + carry, sizeof buf - carry, 0);
 		if (r <= 0) break;
 		int bytes = carry + (int)r, n = bytes / 2;
 		float *f = conv_buf(l, n);
@@ -288,7 +285,7 @@ static input_t *open_rtl_tcp(const char *hostport, const live_opts_t *o) {
 	int fd = tcp_connect(hostport, "rtl_tcp");
 	if (fd < 0) return NULL;
 	uint8_t hello[12];
-	if (read_full(fd, hello, 12) || memcmp(hello, "RTL0", 4)) { fprintf(stderr, "rtl_tcp %s: not an rtl_tcp server\n", hostport); close(fd); return NULL; }
+	if (read_full(fd, hello, 12) || memcmp(hello, "RTL0", 4)) { fprintf(stderr, "rtl_tcp %s: not an rtl_tcp server\n", hostport); sock_close(fd); return NULL; }
 	static const double rates[] = {250000, 1024000, 1536000, 1792000, 1920000, 2048000, 2160000, 2400000, 2560000, 2880000, 3200000};
 	double rate = o->rate > 0 ? o->rate : pick_rate(rates, 11, o->half_span, 0);
 	rtl_cmd(fd, 0x02, (uint32_t)rate);
@@ -320,7 +317,7 @@ static void put32(uint8_t *b, uint32_t v) { b[0] = v; b[1] = v >> 8; b[2] = v >>
 
 static void ss_send(int fd, uint32_t type, const uint8_t *body, uint32_t len) {
 	uint8_t h[8]; put32(h, type); put32(h + 4, len);
-	send(fd, h, 8, MSG_NOSIGNAL); if (len) send(fd, body, len, MSG_NOSIGNAL);
+	send(fd, (const char *)h, 8, MSG_NOSIGNAL); if (len) send(fd, (const char *)body, len, MSG_NOSIGNAL);
 }
 static void ss_set(int fd, uint32_t id, uint32_t v) { uint8_t b[8]; put32(b, id); put32(b + 4, v); ss_send(fd, SS_CMD_SET, b, 8); }
 
@@ -359,7 +356,7 @@ static void *ss_thread(void *arg) {
 static input_t *open_spyserver(const char *hostport, const live_opts_t *o) {
 	int fd = tcp_connect(hostport, "SpyServer");
 	if (fd < 0) return NULL;
-	struct timeval tv = {15, 0}; setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+	sock_timeouts(fd, 15, 0);
 	const char *client = "inmarsat-rx";
 	uint8_t hello[64]; put32(hello, SS_PROTOCOL); memcpy(hello + 4, client, strlen(client));
 	ss_send(fd, SS_CMD_HELLO, hello, 4 + (uint32_t)strlen(client));
@@ -381,12 +378,12 @@ static input_t *open_spyserver(const char *hostport, const live_opts_t *o) {
 #undef U
 	}
 	free(body);
-	if (!have_info || !have_sync) { fprintf(stderr, "SpyServer %s: no device info / sync from the node\n", hostport); close(fd); return NULL; }
-	tv.tv_sec = 0; setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+	if (!have_info || !have_sync) { fprintf(stderr, "SpyServer %s: no device info / sync from the node\n", hostport); sock_close(fd); return NULL; }
+	sock_timeouts(fd, 0, 0);
 	if (o->center_hz < min_iq || o->center_hz > max_iq) {
 		fprintf(stderr, "SpyServer %s: %.4f MHz is outside what this node serves (%.4f–%.4f MHz)\n", hostport,
 			o->center_hz / 1e6, min_iq / 1e6, max_iq / 1e6);
-		close(fd); return NULL;
+		sock_close(fd); return NULL;
 	}
 	// Real rates are max_rate / 2^n, for n from the enforced minimum up to the stage count.
 	double rates[32]; int decs[32], n = 0;
@@ -399,7 +396,7 @@ static input_t *open_spyserver(const char *hostport, const live_opts_t *o) {
 		if (rate > SS_DEFAULT_MAX_RATE && o->half_span <= 0.4 * SS_DEFAULT_MAX_RATE)
 			for (int i = n - 1; i >= 0; i--) if (rates[i] <= SS_DEFAULT_MAX_RATE) { rate = rates[i]; dec = decs[i]; break; }
 	}
-	if (dec < 0) { fprintf(stderr, "SpyServer: %.0f S/s not offered. ", o->rate); list_rates(rates, n); close(fd); return NULL; }
+	if (dec < 0) { fprintf(stderr, "SpyServer: %.0f S/s not offered. ", o->rate); list_rates(rates, n); sock_close(fd); return NULL; }
 	ss_set(fd, SS_STREAMING_MODE, 1);                 // IQ only.
 	ss_set(fd, SS_IQ_FORMAT, forced ? forced : 2);    // 2 = int16.
 	ss_set(fd, SS_IQ_DECIMATION, (uint32_t)dec);
