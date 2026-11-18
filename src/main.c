@@ -9,6 +9,7 @@
 #include "apps.h"
 #include "archive.h"
 #include "channel.h"
+#include "compat.h"
 #include "cluster.h"
 #include "content.h"
 #include "input.h"
@@ -246,19 +247,23 @@ static void clusters_gc(slot_t *slots, int nslots) {
 static void load_mobile_key(const char *path) {
 	char def[512];
 	if (!path) {
-		const char *home = getenv("HOME");
-		if (!home) { fprintf(stderr, "inmarsat-rx: no HOME and no --mobile-key: STD-C ship metadata off\n"); return; }
-		snprintf(def, sizeof def, "%s/.config/inmarsat-rx", home);
-		mkdir(def, 0700);  // Its parent ~/.config normally exists; an error shows up at open() below.
-		snprintf(def, sizeof def, "%s/.config/inmarsat-rx/mobile.key", home);
+#ifdef _WIN32
+		// %APPDATA%\inmarsat-rx\mobile.key: the user's own profile, which other users cannot read.
+		const char *home = getenv("APPDATA"), *sub = "inmarsat-rx";
+#else
+		const char *home = getenv("HOME"), *sub = ".config/inmarsat-rx";
+#endif
+		if (!home) { fprintf(stderr, "inmarsat-rx: no home directory and no --mobile-key: STD-C ship metadata off\n"); return; }
+		snprintf(def, sizeof def, "%s/%s", home, sub);
+		compat_mkdir(def, 0700);  // Its parent normally exists; an error shows up at open() below.
+		snprintf(def, sizeof def, "%s/%s/mobile.key", home, sub);
 		path = def;
 	}
 	unsigned char key[32];
-	int fd = open(path, O_RDONLY);
+	int fd = open(path, O_RDONLY | O_BINARY);
 	if (fd < 0 && errno == ENOENT) {
-		int r = open("/dev/urandom", O_RDONLY), ok = r >= 0 && read(r, key, sizeof key) == (ssize_t)sizeof key;
-		if (r >= 0) close(r);
-		int w = ok ? open(path, O_WRONLY | O_CREAT | O_EXCL, 0600) : -1;
+		int ok = !compat_random(key, sizeof key);
+		int w = ok ? open(path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0600) : -1;
 		if (w < 0 || write(w, key, sizeof key) != (ssize_t)sizeof key) {
 			fprintf(stderr, "inmarsat-rx: cannot create %s: STD-C ship metadata off\n", path);
 			if (w >= 0) close(w);
@@ -283,6 +288,7 @@ static double trial_seconds(int kind) { return kind == CH_STDC ? 30 : kind == CH
 static long trial_frames(int kind) { return kind == CH_STDC ? 2 : 3; }
 
 int main(int argc, char **argv) {
+	if (sock_init()) { fprintf(stderr, "inmarsat-rx: cannot start Winsock\n"); return 1; }
 	const char *input = "-", *station = NULL, *gain = NULL, *plan = NULL, *sat_default = NULL;
 	const char *archive_dir = NULL, *mobile_key_path = NULL, *content_dir = NULL;
 	int content_port = 8894;
@@ -475,7 +481,7 @@ int main(int argc, char **argv) {
 		jb_free(&b);
 	}
 
-	long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+	long ncpu = compat_ncpu();
 	if (threads <= 0) threads = scan ? (int)ncpu : nslots < ncpu ? nslots : (int)ncpu;
 	if (threads < 1) threads = 1;
 	if (threads > MAX_CHANNELS) threads = MAX_CHANNELS;

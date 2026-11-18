@@ -33,9 +33,13 @@ add_custom_command(
 add_executable(inmarsat-rx
 	src/main.c src/channel.c src/dsp.c src/frontend.c src/psk.c src/msk.c src/fec.c
 	src/aero.c src/stdc.c src/apps.c src/out.c src/input_file.c src/input_live.c
-	src/plans.c src/events.c src/archive.c src/web.c src/scan.c src/cluster.c src/sha256.c src/content.c ${CMAKE_CURRENT_BINARY_DIR}/web_page.c
+	src/plans.c src/events.c src/archive.c src/web.c src/scan.c src/cluster.c src/sha256.c src/content.c src/compat.c ${CMAKE_CURRENT_BINARY_DIR}/web_page.c
 	${CMAKE_CURRENT_BINARY_DIR}/content_page.c)
 target_link_libraries(inmarsat-rx m Threads::Threads)
+if(WIN32)
+	# Windows (MSYS2 / MinGW-w64): Winsock and the system random generator.
+	target_link_libraries(inmarsat-rx ws2_32 bcrypt)
+endif()
 
 if(LIBACARS_FOUND)
 	target_compile_definitions(inmarsat-rx PRIVATE HAVE_LIBACARS)

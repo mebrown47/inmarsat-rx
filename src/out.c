@@ -1,13 +1,12 @@
 // Copyright (c) 2026 Mike Brown
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "out.h"
-#include <netdb.h>
+#include "compat.h"
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <unistd.h>
 
 static void reserve(jbuf_t *b, size_t extra) {
@@ -87,6 +86,7 @@ static int udp_resolve(udp_dest_t *d) {
 	}
 	int fd = socket(res->ai_family, SOCK_DGRAM, 0);
 	if (fd >= 0) {
+		sock_nonblock(fd);   // MSG_DONTWAIT does the same on Linux; Windows has only this.
 		pthread_mutex_lock(&lock);
 		memcpy(&d->addr, res->ai_addr, res->ai_addrlen); d->len = res->ai_addrlen; d->fd = fd;
 		pthread_mutex_unlock(&lock);
@@ -146,6 +146,6 @@ void out_emit(const char *json) {
 
 void out_close(void) {
 	pthread_mutex_lock(&lock);
-	for (int i = 0; i < ndests; i++) if (dests[i].fd >= 0) { close(dests[i].fd); dests[i].fd = -1; }
+	for (int i = 0; i < ndests; i++) if (dests[i].fd >= 0) { sock_close(dests[i].fd); dests[i].fd = -1; }
 	pthread_mutex_unlock(&lock);
 }

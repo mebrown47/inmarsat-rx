@@ -20,6 +20,23 @@ libacars, libairspy and libhackrf are each optional; CMake reports what it found
 libacars, ACARS text still decodes but CPDLC/ADS-C payloads are not expanded. RTL-SDR is reached
 through `rtl_tcp` (start `rtl_tcp -a 127.0.0.1` next to the dongle).
 
+### Windows (MSYS2, MinGW-w64)
+
+In progress: recordings, `rtl_tcp` and SpyServer sources, stdout, UDP, the archive and both web
+pages are being brought up first; Airspy and HackRF over USB follow. In an MSYS2 **UCRT64** shell:
+
+```bash
+pacman -S --needed git mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,python}
+cmake -S . -B build -G Ninja && cmake --build build
+tests/run_tests.sh build
+```
+
+To run `inmarsat-rx.exe` outside the MSYS2 shell, put `libwinpthread-1.dll` (from
+`C:\msys64\ucrt64\bin`) beside it. The mobile-number key lives in
+`%APPDATA%\inmarsat-rx\mobile.key`, in your own profile; Windows has no file modes, so the STD-C
+message folder (`--stdc-content`) should also be inside your profile, where other users cannot
+read it.
+
 ## Run
 
 ```bash

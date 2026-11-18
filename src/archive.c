@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // JSONL archive, as vdl2-sniffer's and iridium-sniffer's: same directory layout and time rules.
 #include "archive.h"
+#include "compat.h"
 #include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -15,7 +16,7 @@ static FILE *f;
 static int day;
 
 int archive_open(const char *d) {
-	if (mkdir(d, 0755) != 0 && errno != EEXIST) {
+	if (compat_mkdir(d, 0755) != 0 && errno != EEXIST) {
 		fprintf(stderr, "archive: cannot create directory %s: %s\n", d, strerror(errno));
 		return -1;
 	}
@@ -36,7 +37,7 @@ void archive_write(double t_ms, const char *line) {
 		if (f) fclose(f);
 		char path[700];
 		snprintf(path, sizeof path, "%s/inmarsat-%08d.jsonl", dir, d);
-		f = fopen(path, "a");
+		f = fopen(path, "ab");
 		if (!f) fprintf(stderr, "archive: cannot open %s: %s\n", path, strerror(errno));
 		day = d;
 	}
