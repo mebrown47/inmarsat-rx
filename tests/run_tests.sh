@@ -30,18 +30,24 @@ check "five ACARS messages" "[ \$(wc -l < '$TMP/out.jsonl') -eq 5 ]"
 check "PT-TME route clearance, word for word" \
   "grep -qF '\"text\":\"- #MDFPN/FNTAM3668/RP:DA:SBRJ:AA:SBBR:F:MUDKA,S21343W043345.UM409..ISIPI,S17078W' '$TMP/out.jsonl'"
 check "records carry satellite and service" "grep -q '\"sat\":\"i4f3\",\"channel\":\"aerol600\"' '$TMP/out.jsonl'"
-if "$BIN" -i "$DATA" $CH --stats 0 2>&1 >/dev/null | grep -q 'without libacars'; then
+# Read the startup line into a variable: piping into grep -q would stop the program early, and
+# with pipefail that broken pipe reads as "not found".
+if [[ "$("$BIN" -i "$DATA" $CH --stats 0 2>&1 >/dev/null)" == *"without libacars"* ]]; then
   echo "skip CPDLC decode (built without libacars)"
 else
   check "CPDLC for C-GFAJ decoded by libacars" "grep '\"reg\":\"C-GFAJ\"' '$TMP/out.jsonl' | grep -q '\"kind\":\"CPDLC\"'"
 fi
 
 # The loops act sample by sample, so how the input is blocked changes nothing.
-# (Record times follow the read a message completes in, so compare the messages themselves.)
+# (Record times follow the read a message completes in, so compare the messages themselves; and
+# two channels' messages that complete in the same read may come out in either order, as the
+# operating system schedules their threads, so compare them sorted.)
 "$BIN" -i "$DATA" $CH --stats 0 --block 777 > "$TMP/small.jsonl" 2>/dev/null
 "$BIN" -i "$DATA" $CH --stats 0 --block 65536 > "$TMP/big.jsonl" 2>/dev/null
-keys() { sed 's/"firstSeen":[0-9]*,"lastSeen":[0-9]*,//' "$1"; }
+keys() { sed 's/"firstSeen":[0-9]*,"lastSeen":[0-9]*,//' "$1" | sort; }
 check "same messages with 777- and 65536-sample reads" "cmp -s <(keys '$TMP/small.jsonl') <(keys '$TMP/big.jsonl')"
+cmp -s <(keys "$TMP/small.jsonl") <(keys "$TMP/big.jsonl") || { echo "     777-sample reads: $(wc -l < "$TMP/small.jsonl") records, 65536: $(wc -l < "$TMP/big.jsonl"); first difference:"
+  diff <(keys "$TMP/small.jsonl") <(keys "$TMP/big.jsonl") | head -4 | cut -c1-200 | sed 's/^/     /'; }
 
 # Discovery alone finds both carriers.
 "$BIN" -i "$DATA" --scan --scan-period 5 --sat i4f3 --stats 0 -q 2> "$TMP/scan.txt"
