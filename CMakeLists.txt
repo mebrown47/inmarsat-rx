@@ -12,6 +12,12 @@ if(NATIVE)
 endif()
 add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 
+# MSYS2's MSYS or Cygwin compiler builds against a POSIX emulation DLL (msys-2.0.dll, cygwin1.dll):
+# it works, but is not a native Windows program. Configure in the UCRT64 shell for that.
+if(CMAKE_SYSTEM_NAME MATCHES "MSYS|CYGWIN")
+	message(WARNING "Building against the ${CMAKE_SYSTEM_NAME} POSIX layer, not as a native Windows program. "
+		"For a native .exe, configure from an MSYS2 UCRT64 shell (compiler /ucrt64/bin/gcc) in a fresh build folder.")
+endif()
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(LIBACARS libacars-2)
