@@ -97,7 +97,14 @@ input_t *input_open_file(const char *path, int format) {
 	snprintf(data, sizeof data, "%s", path);
 	if (strcmp(path, "-")) {
 		size_t n = strlen(path);
+		// The folder part ends at the last / (or \ on Windows); an extension is a dot after it.
+		const char *slash = strrchr(path, '/');
+#ifdef _WIN32
+		const char *bs = strrchr(path, '\\');
+		if (bs && (!slash || bs > slash)) slash = bs;
+#endif
 		const char *dot = strrchr(path, '.');
+		if (dot && slash && dot < slash) dot = NULL;
 		size_t stem = dot ? (size_t)(dot - path) : n;
 		if (dot && !strcmp(dot, ".sigmf-meta")) snprintf(data, sizeof data, "%.*s.sigmf-data", (int)stem, path);
 		snprintf(meta, sizeof meta, "%.*s.sigmf-meta", (int)stem, path);
@@ -105,7 +112,6 @@ input_t *input_open_file(const char *path, int format) {
 		// SigMF names the dataset when it is not <stem>.sigmf-data.
 		char *json = slurp(meta), ds[512];
 		if (json && meta_value(json, "core:dataset", ds, sizeof ds) && dot && !strcmp(dot, ".sigmf-meta")) {
-			const char *slash = strrchr(path, '/');
 			snprintf(data, sizeof data, "%.*s%s", slash ? (int)(slash - path + 1) : 0, path, ds);
 		}
 		free(json);

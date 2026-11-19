@@ -32,8 +32,9 @@ cmake -S . -B build -G Ninja && cmake --build build
 tests/run_tests.sh build
 ```
 
-To run `inmarsat-rx.exe` outside the MSYS2 shell, put `libwinpthread-1.dll` (from
-`C:\msys64\ucrt64\bin`) beside it. The mobile-number key lives in
+The `.exe` is linked statically (`-DSTATIC=OFF` to change that), so it runs on any 64-bit Windows
+10 or 11 without MSYS2. `packaging/package-windows.sh` builds the zip to hand out: the `.exe`, the
+test recording as a sample, `README-Windows.txt` (how to run it there), LICENSE and NOTICE. The mobile-number key lives in
 `%APPDATA%\inmarsat-rx\mobile.key`, in your own profile; Windows has no file modes, so the STD-C
 message folder (`--stdc-content`) should also be inside your profile, where other users cannot
 read it.

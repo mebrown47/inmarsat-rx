@@ -45,6 +45,12 @@ target_link_libraries(inmarsat-rx m Threads::Threads)
 if(WIN32)
 	# Windows (MSYS2 / MinGW-w64): Winsock and the system random generator.
 	target_link_libraries(inmarsat-rx ws2_32 bcrypt)
+	# One self-contained .exe to hand to people without MSYS2: the MinGW runtime and pthreads linked
+	# in (optional libraries then need their static .a too).
+	option(STATIC "Link the Windows .exe statically" ON)
+	if(STATIC AND MINGW)
+		target_link_options(inmarsat-rx PRIVATE -static)
+	endif()
 endif()
 
 if(LIBACARS_FOUND)
