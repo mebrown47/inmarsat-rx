@@ -51,6 +51,10 @@ inmarsat-rx -i spyserver:HOST:PORT -c 1537.1056:stdc
 # A recording (SigMF metadata supplies rate, centre and format)
 inmarsat-rx -i capture.sigmf-meta -c 1545.1697:aerol600
 
+# A raw capture: the extension gives the format, a name like this the rate and centre;
+# --start sets the time of its first sample (otherwise records are timed from now)
+inmarsat-rx -i i4f3-1546.04M-2.5Msps.ci16 --plan i4f3 --start 2026-10-04T23:38:16
+
 # Feed collectors over UDP (up to 8: comma-separated or -u again), nothing on stdout
 inmarsat-rx -i airspy -b -c 1545.1697:aerol600 -u 127.0.0.1:5555,collector.example:5555 --station-id XX-INMR -q
 ```
