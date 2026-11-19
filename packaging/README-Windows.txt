@@ -64,6 +64,19 @@ Airspy and HackRF over USB directly are not in this build yet.
 Add -b to power the LNA through the SDR's bias-tee, if it has one and your
 LNA needs it. Add --web 8892 and open http://localhost:8892/ for the live page.
 
+If you already decode STD-C:
+- Close the program that uses the dongle now (SDR#, SDR++, rtl_fm ...):
+  only one program can open it at a time.
+- Give your usual frequency correction with -p PPM. At 1.5 GHz every 1 ppm is
+  1.5 kHz, and the decoder searches only +/-2.5 kHz around a channel; --scan
+  finds a carrier wherever it is, which is why the examples use it.
+- If you listen to a channel other than 1537.1056 MHz, name it with
+  -c FREQ:stdc:alphasat (frequency in MHz) in place of --plan alphasat.
+- -b powers an LNA only through an rtl_tcp that supports the bias-tee (the
+  RTL-SDR Blog Windows tools do); otherwise power it as you do today.
+- Comparing the EGC messages with your current decoder's is the most useful
+  check of all.
+
 UK and Europe, Alphasat:
 
   STD-C safety broadcasts (start here: one known carrier, strong and steady):
