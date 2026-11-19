@@ -12,6 +12,13 @@
 #include <time.h>
 
 #ifdef _WIN32
+// Less of windows.h (and no min/max macros) for the sockets headers to pull in.
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <string.h>
 #include <winsock2.h>
 #include <ws2tcpip.h>

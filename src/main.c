@@ -552,15 +552,15 @@ int main(int argc, char **argv) {
 		int nfound = scanner ? scan_report(scanner, found, 128) : -1;
 		for (int f = 0; f < nfound; f++) {
 			const carrier_t *cr = &found[f];
-			int trials = 0, near = 0;
+			int trials = 0, covered = 0;
 			for (int i = 0; i < nslots; i++) {
 				channel_info_t ci; channel_info(slots[i].ch, &ci);
 				trials += slots[i].trial;
 				double tol = (slots[i].types[0] == CH_AERO_H || !strcmp(ci.type, "aero") || cr->width > 6000) ? 7000 : 1500;
-				if (fabs(ci.freq - cr->freq) < tol) near = 1;
+				if (fabs(ci.freq - cr->freq) < tol) covered = 1;
 			}
-			for (int g = 0; g < nignore; g++) if (fabs(ignore[g].freq - cr->freq) < 1000 && seconds < ignore[g].until) near = 1;
-			if (near || trials >= MAX_TRIALS || nslots >= MAX_CHANNELS) continue;
+			for (int g = 0; g < nignore; g++) if (fabs(ignore[g].freq - cr->freq) < 1000 && seconds < ignore[g].until) covered = 1;
+			if (covered || trials >= MAX_TRIALS || nslots >= MAX_CHANNELS) continue;
 			if (fabs(cr->freq - in->center_hz) > usable) continue;
 			// What the width allows: MSK 600 ~0.9 kHz, MSK 1200 and STD-C BPSK ~1.5-2.5 kHz, Aero-H+ ~10 kHz.
 			int types[3], nt = 0;

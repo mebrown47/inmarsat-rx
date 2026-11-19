@@ -23,7 +23,8 @@ through `rtl_tcp` (start `rtl_tcp -a 127.0.0.1` next to the dongle).
 ### Windows (MSYS2, MinGW-w64)
 
 In progress: recordings, `rtl_tcp` and SpyServer sources, stdout, UDP, the archive and both web
-pages are being brought up first; Airspy and HackRF over USB follow. In an MSYS2 **UCRT64** shell:
+pages work natively; Airspy and HackRF over USB follow. In an MSYS2 **UCRT64** shell (not the
+MSYS one, whose compiler builds against its POSIX emulation DLL instead; CMake warns if so):
 
 ```bash
 pacman -S --needed git diffutils mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,pkgconf,python}

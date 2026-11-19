@@ -30,7 +30,7 @@ const char *sock_err(void) {
 	int e = WSAGetLastError();
 	if (!FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, (DWORD)e, 0, buf, sizeof buf, NULL))
 		snprintf(buf, sizeof buf, "socket error %d", e);
-	for (size_t n = strlen(buf); n && (buf[n - 1] == '\n' || buf[n - 1] == '\r' || buf[n - 1] == '.'); n--) buf[n - 1] = 0;
+	for (size_t n = strlen(buf); n && strchr(" .\r\n", buf[n - 1]); n--) buf[n - 1] = 0;
 	return buf;
 }
 
