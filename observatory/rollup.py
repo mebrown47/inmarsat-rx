@@ -26,7 +26,11 @@ Usage:
 """
 
 import argparse
-import fcntl
+try:
+    import fcntl
+except ImportError:   # Windows: a native Python has no fcntl.
+    fcntl = None
+    import msvcrt
 import glob
 import json
 import os
@@ -371,6 +375,22 @@ def ingest_file(con, path, agg, verbose):
     return n
 
 
+def lock_exclusive(f):
+    """Wait for an exclusive lock on the open file f, held until the process ends."""
+    if fcntl:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        return
+    # Windows: lock the file's first byte. LK_LOCK gives up after 10 tries a second apart, so try
+    # again until the other rollup is done.
+    while True:
+        try:
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+            return
+        except OSError:
+            pass
+
+
 def main():
     ap = argparse.ArgumentParser(description="Inmarsat Observatory rollup")
     ap.add_argument("--archive", default="archive", help="directory of inmarsat-YYYYMMDD.jsonl files")
@@ -385,8 +405,8 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
     # One rollup at a time: two reading from the same offsets would both add the same lines
     # (the timer and a run by hand, say). The second waits for the first.
-    lock = open(args.db + ".lock", "w")
-    fcntl.flock(lock, fcntl.LOCK_EX)
+    lock = open(args.db + ".lock", "a+")
+    lock_exclusive(lock)
     con = sqlite3.connect(args.db)
     init_db(con)
     agg = Agg()
